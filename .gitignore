@@ -1,0 +1,10 @@
+/build
+/dist
+/respaldo carpeta config de antenas
+resultados_antenas.csv
+prioridad_wifi.sh
+configfurar_red.sh
+restaurar_red.sh
+*__pycache__
+*spec
+respaldo carpeta config de antenas/

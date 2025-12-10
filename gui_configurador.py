@@ -1,0 +1,1119 @@
+#!/usr/bin/env python3
+import os
+import sys
+import threading
+import subprocess
+import signal
+import time
+import json
+import queue
+import importlib
+
+# Verificar e instalar dependencias necesarias
+def ensure_gui_dependencies():
+    # Primero instalamos dependencias que podemos manejar con pip
+    packages = {
+        'PIL': 'pillow',  # Para manejo de imágenes
+    }
+    
+    for import_name, pip_name in packages.items():
+        try:
+            importlib.import_module(import_name)
+        except ImportError:
+            print(f"[DEPENDENCIAS] Instalando {pip_name}...")
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", pip_name])
+            except subprocess.CalledProcessError as e:
+                print(f"❌ Error instalando {pip_name}: {e}")
+                sys.exit(1)
+
+    # Ahora verificamos tkinter e intentamos instalarlo si es posible
+    try:
+        import tkinter
+        print(f"[DEPENDENCIAS] ✓ tkinter disponible (versión {tkinter.TkVersion})")
+        return True
+    except ImportError:
+        print("\n[DEPENDENCIAS] ❌ tkinter no está disponible.")
+        print("\nIntentando instalar tkinter automáticamente...")
+        
+        try:
+            if sys.platform == 'darwin':  # macOS
+                if os.path.exists('/opt/homebrew/bin/brew') or os.path.exists('/usr/local/bin/brew'):
+                    print("[DEPENDENCIAS] Detectado Homebrew, intentando instalar python-tk...")
+                    try:
+                        subprocess.check_call(['brew', 'install', 'python-tk'])
+                        print("✓ Instalación completada. Por favor, reinicie el script.")
+                        sys.exit(0)
+                    except subprocess.CalledProcessError:
+                        pass
+                
+            elif sys.platform == 'linux':  # Linux
+                # Intentar detectar la distribución
+                if os.path.exists('/etc/debian_version'):  # Debian/Ubuntu
+                    print("[DEPENDENCIAS] Detectado sistema Debian/Ubuntu")
+                    cmd = ['sudo', 'apt-get', 'install', '-y', 'python3-tk']
+                elif os.path.exists('/etc/fedora-release'):  # Fedora
+                    print("[DEPENDENCIAS] Detectado sistema Fedora")
+                    cmd = ['sudo', 'dnf', 'install', '-y', 'python3-tkinter']
+                else:
+                    cmd = None
+
+                if cmd:
+                    print(f"[DEPENDENCIAS] Ejecutando: {' '.join(cmd)}")
+                    print("Se solicitará contraseña de administrador...")
+                    try:
+                        subprocess.check_call(cmd)
+                        print("✓ Instalación completada. Por favor, reinicie el script.")
+                        sys.exit(0)
+                    except subprocess.CalledProcessError:
+                        pass
+        
+        except Exception as e:
+            print(f"No se pudo instalar automáticamente: {e}")
+
+        # Si llegamos aquí, no se pudo instalar automáticamente
+        print("\n⚠️ No se pudo instalar tkinter automáticamente.")
+        print("\nPor favor, instale tkinter manualmente según su sistema operativo:")
+        print("\n📝 Instrucciones de instalación:")
+        if sys.platform == 'darwin':  # macOS
+            print("macOS:")
+            print("1. Instale Homebrew desde https://brew.sh si no lo tiene")
+            print("2. Ejecute: brew install python-tk")
+        elif sys.platform == 'linux':  # Linux
+            print("Ubuntu/Debian:")
+            print("1. Ejecute: sudo apt-get update")
+            print("2. Ejecute: sudo apt-get install python3-tk")
+            print("\nFedora:")
+            print("1. Ejecute: sudo dnf install python3-tkinter")
+            print("\nOtras distribuciones:")
+            print("Busque el paquete python3-tk en su gestor de paquetes")
+        elif sys.platform == 'win32':  # Windows
+            print("Windows:")
+            print("1. Desinstale Python (Panel de Control > Programas > Desinstalar)")
+            print("2. Descargue Python desde https://www.python.org/downloads/")
+            print("3. Durante la instalación, marque la casilla 'tcl/tk and IDLE'")
+            print("4. Complete la instalación y reinicie su computadora")
+        
+        print("\nDespués de instalar tkinter, ejecute este script nuevamente.")
+        sys.exit(1)
+
+# Verificar dependencias antes de importar
+ensure_gui_dependencies()
+
+# Importar módulos necesarios
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
+from tkinter.scrolledtext import ScrolledText
+from PIL import Image, ImageTk, ImageDraw, ImageChops
+
+SETTINGS_FILE = 'gui_settings.json'
+DEFAULT_SETTINGS = {
+    'archivo_firmware': os.environ.get('ARCHIVO_LOCAL_FW', 'WA.v8.7.19.48279.250811.0636.bin'),
+    'backup_cfg': os.environ.get('BACKUP_CFG', 'WA-28704EB63776.cfg'),
+    'range_start': 11,
+    'range_end': 18,
+    'modo_flujo': 'full'  # 'full' = configurar y actualizar, 'config' = solo configurar
+}
+
+class GuiConfig:
+    def round_corners(self, image, radius):
+        """Redondea las esquinas de una imagen PIL"""
+        mask = Image.new('L', image.size, 0)
+        draw = ImageDraw.Draw(mask)
+        draw.rounded_rectangle((0, 0) + image.size, radius=radius, fill=255)
+        
+        if image.mode != 'RGBA':
+            image = image.convert('RGBA')
+            
+        r, g, b, a = image.split()
+        # Combinar la máscara con el canal alfa existente
+        new_a = ImageChops.multiply(a, mask)
+        image.putalpha(new_a)
+        return image
+
+    # Eliminar duplicados de run_subprocess fuera de la clase. La versión dentro de la clase es la válida.
+    def show_mac_summary(self, macs, success=True):
+        """Carga los resultados desde el CSV y los muestra en la tabla"""
+        self.load_results_from_csv()
+        
+        # Cambiar automáticamente a la pestaña de resultados
+        if hasattr(self, 'notebook'):
+            self.notebook.select(self.tab_resultados)
+    
+    def load_results_from_csv(self):
+        """Carga los resultados desde el archivo CSV y los muestra en la tabla"""
+        import csv
+        csv_path = os.path.join(os.getcwd(), 'resultados_antenas.csv')
+        
+        # Limpiar tabla existente
+        for item in self.results_tree.get_children():
+            self.results_tree.delete(item)
+        
+        if not os.path.exists(csv_path):
+            self.copy_mac_btn.config(state='disabled')
+            return
+        
+        try:
+            with open(csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                count = 0
+                for row in reader:
+                    count += 1
+                    exito_val = str(row.get('exito', '')).lower()
+                    estado = "✅ OK" if exito_val in ['1', 'true', 'yes'] else "❌ ERROR"
+                    self.results_tree.insert('', 'end', values=(
+                        row.get('ip_inicial', '-'),
+                        row.get('ip_final', '-'),
+                        row.get('mac', 'No disponible'),
+                        estado
+                    ))
+                
+                if count > 0:
+                    self.copy_mac_btn.config(state='normal')
+                else:
+                    self.copy_mac_btn.config(state='disabled')
+        except Exception as e:
+            print(f"Error al cargar resultados: {e}")
+            self.copy_mac_btn.config(state='disabled')
+    def copy_macs_to_clipboard(self):
+        """Copia todas las MACs de la tabla al portapapeles"""
+        macs = []
+        for item in self.results_tree.get_children():
+            values = self.results_tree.item(item)['values']
+            if len(values) >= 3:
+                mac = values[2]  # La MAC está en la tercera columna
+                if mac and mac != 'No disponible':
+                    macs.append(mac)
+        
+        if macs:
+            mac_text = '\n'.join(macs)
+            self.root.clipboard_clear()
+            self.root.clipboard_append(mac_text)
+            self.root.update()
+            # Opcional: mostrar mensaje de confirmación
+            self.status_var.set(f'Copiadas {len(macs)} MACs al portapapeles')
+        else:
+            self.status_var.set('No hay MACs para copiar')
+
+    def copy_console_log(self):
+        """Copia el contenido de la consola al portapapeles"""
+        log_text = self.console.get('1.0', 'end').strip()
+        if log_text:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(log_text)
+            self.root.update()
+            self.status_var.set('Log copiado al portapapeles')
+        else:
+            self.status_var.set('El log está vacío')
+
+    def update_progress_fraction(self, frac):
+        # Solo avanza para la antena en curso (active_idx, nunca suma a completed_antennas aquí)
+        self.progress.config(mode='determinate')
+        self.progress.stop()
+        barra = self.active_idx + frac
+        # La barra nunca retrocede: progreso no menor al valor anterior
+        if barra > self.progress['value']:
+            self.progress['value'] = min(self.total_antennas, barra)
+        self.root.update_idletasks()
+    def _update_naranja(self):
+        self.set_antenna_in_progress()
+        self.progress.config(mode='indeterminate')
+        self.progress.start(10)  # Valor pequeño, animación visible
+    def set_antenna_in_progress(self):
+        # Ilumina sólo el punto activo
+        # Colores que se ven bien en ambos temas
+        inactive_fill = '#505050' if self.dark_mode else '#d0d0d0'
+        inactive_outline = '#707070' if self.dark_mode else '#a0a0a0'
+        
+        for i, canvas in enumerate(self.antenna_points):
+            canvas.delete("all")
+            if i < self.active_idx:
+                canvas.create_oval(2,4,14,16, fill='#14c714', outline='green')
+            elif i == self.active_idx:
+                canvas.create_oval(2,4,14,16, fill='#ffa500', outline='#b36a00')
+            else:
+                canvas.create_oval(2,4,14,16, fill=inactive_fill, outline=inactive_outline)
+
+    def __init__(self, root):
+        self.root = root
+        self.root.title('CONFIGURADOR DE ANTENAS UBIQUITI SIIP INTERNET')
+        self.status_var = tk.StringVar(value='Listo')
+        self.settings = self.load_settings()
+        self.proc = None
+        self.proc_thread = None
+        self.running = False
+        self.queue = queue.Queue()
+        self.total_antennas = max(1, int(self.settings.get('range_end', 18)) - int(self.settings.get('range_start', 11)) + 1)
+        self.completed_antennas = 0
+        
+        # Dark mode state
+        self.dark_mode = self.settings.get('dark_mode', False)
+        self.setup_themes()
+
+        self.build_ui()
+        # Periodic queue flush
+        self.root.after(100, self.flush_queue)
+        
+        # Apply initial theme
+        self.apply_theme()
+
+    def load_settings(self):
+        if os.path.exists(SETTINGS_FILE):
+            try:
+                with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return DEFAULT_SETTINGS.copy()
+
+    def save_settings(self):
+        try:
+            with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.settings, f, indent=2)
+        except Exception as e:
+            messagebox.showwarning('Error', f'No se pudo guardar configuración: {e}')
+    
+    def setup_themes(self):
+        """Define los colores para modo claro y oscuro"""
+        self.themes = {
+            'light': {
+                'bg': '#f0f0f0',
+                'fg': 'black',
+                'console_bg': '#fafafa',
+                'console_fg': 'black',
+                'button_bg': '#007AFF',  # Azul estilo App Store
+                'button_fg': 'white',
+                'status_bg': '#e0e0e0',
+                'frame_bg': '#f0f0f0',
+                'scrollbar_bg': '#c0c0c0',  # Gris claro para scrollbars
+                'scrollbar_trough': '#e8e8e8',
+            },
+            'dark': {
+                'bg': '#2b2b2b',
+                'fg': '#e0e0e0',
+                'console_bg': '#1e1e1e',
+                'console_fg': '#e0e0e0',
+                'button_bg': '#007AFF',  # Azul estilo App Store
+                'button_fg': 'white',
+                'status_bg': '#1e1e1e',
+                'frame_bg': '#2b2b2b',
+                'scrollbar_bg': '#3a3a3a',  # Gris oscuro para scrollbars
+                'scrollbar_trough': '#2b2b2b',
+            }
+        }
+    
+    def toggle_theme(self):
+        """Alterna entre modo oscuro y claro"""
+        self.dark_mode = not self.dark_mode
+        self.settings['dark_mode'] = self.dark_mode
+        self.save_settings()
+        self.apply_theme()
+    
+    def apply_theme(self):
+        """Aplica el tema actual a todos los widgets"""
+        theme = self.themes['dark'] if self.dark_mode else self.themes['light']
+        
+        # Actualizar root
+        self.root.configure(bg=theme['bg'])
+        
+        # Actualizar main_frame
+        if hasattr(self, 'main_frame'):
+            self.main_frame.configure(bg=theme['bg'])
+        
+        # Actualizar header_frame
+        if hasattr(self, 'header_frame'):
+            self.header_frame.configure(bg=theme['bg'])
+            for child in self.header_frame.winfo_children():
+                if isinstance(child, tk.Label):
+                    child.configure(bg=theme['bg'], fg=theme['fg'])
+        
+        # Actualizar logo_theme_frame y logo_label
+        if hasattr(self, 'logo_theme_frame'):
+            self.logo_theme_frame.configure(bg=theme['bg'])
+        if hasattr(self, 'logo_label'):
+            self.logo_label.configure(bg=theme['bg'])
+        
+        # Actualizar frames con LabelFrame
+        for frame_attr in ['control_frame', 'antennas_frame', 'log_frame']:
+            if hasattr(self, frame_attr):
+                frame = getattr(self, frame_attr)
+                frame.configure(bg=theme['frame_bg'], fg=theme['fg'])
+        
+        # Actualizar btn_container
+        if hasattr(self, 'btn_container'):
+            self.btn_container.configure(bg=theme['frame_bg'])
+        
+        # El start_btn es ttk.Button y usa estilos, no necesita actualización aquí
+        
+        # Actualizar botón de tema
+        if hasattr(self, 'theme_btn'):
+            icon = '🌙' if not self.dark_mode else '☀️'
+            self.theme_btn.configure(text=icon, bg=theme['button_bg'], fg=theme['button_fg'])
+        
+        # Actualizar icons_container
+        if hasattr(self, 'icons_container'):
+            self.icons_container.configure(bg=theme['frame_bg'])
+        
+        # Actualizar antenna points
+        if hasattr(self, 'antenna_points'):
+            for canvas in self.antenna_points:
+                canvas.configure(bg=theme['frame_bg'], highlightthickness=0)
+        
+        # Actualizar antenna icons labels
+        if hasattr(self, 'antenna_icons'):
+            for label in self.antenna_icons:
+                label.configure(bg=theme['frame_bg'])
+        
+        # Actualizar consola y su scrollbar
+        if hasattr(self, 'console'):
+            self.console.configure(bg=theme['console_bg'], fg=theme['console_fg'], 
+                                  insertbackground=theme['console_fg'])
+            # Configurar scrollbar de la consola
+            try:
+                # ScrolledText tiene un scrollbar vertical interno
+                vbar = self.console.vbar if hasattr(self.console, 'vbar') else None
+                if vbar:
+                    vbar.configure(bg=theme.get('scrollbar_bg', theme['console_bg']), 
+                                 troughcolor=theme.get('scrollbar_trough', theme['console_bg']),
+                                 activebackground=theme.get('scrollbar_bg', theme['fg']),
+                                 highlightthickness=0, borderwidth=0)
+            except:
+                pass
+        
+        # Actualizar status bar
+        if hasattr(self, 'status_bar'):
+            self.status_bar.configure(bg=theme['status_bg'])
+            for child in self.status_bar.winfo_children():
+                if isinstance(child, tk.Label):
+                    child.configure(bg=theme['status_bg'], fg=theme['fg'])
+        
+        # Actualizar pestañas (notebook y tabs)
+        if hasattr(self, 'notebook'):
+            # El notebook de ttk se estiliza diferente
+            pass
+        
+        if hasattr(self, 'tab_proceso'):
+            self.tab_proceso.configure(bg=theme['bg'])
+        
+        # Actualizar log_frame y sus hijos
+        if hasattr(self, 'log_frame'):
+            self.log_frame.configure(bg=theme['frame_bg'], fg=theme['fg'])
+            if hasattr(self, 'log_tools_frame'):
+                self.log_tools_frame.configure(bg=theme['frame_bg'])
+            if hasattr(self, 'copy_log_btn'):
+                # Usar estilo de botón secundario o el mismo azul
+                self.copy_log_btn.configure(bg=theme['button_bg'], fg=theme['button_fg'])
+
+        if hasattr(self, 'tab_resultados'):
+            self.tab_resultados.configure(bg=theme['bg'])
+            # Actualizar todos los frames dentro de la pestaña de resultados
+            for child in self.tab_resultados.winfo_children():
+                if isinstance(child, tk.Frame):
+                    child.configure(bg=theme['bg'])
+                    for subchild in child.winfo_children():
+                        if isinstance(subchild, tk.Frame):
+                            subchild.configure(bg=theme['bg'])
+                        elif isinstance(subchild, tk.Label):
+                            subchild.configure(bg=theme['bg'], fg=theme['fg'])
+                        elif isinstance(subchild, tk.Button):
+                            # Botón de copiar MACs
+                            subchild.configure(bg=theme['button_bg'], fg=theme['button_fg'])
+        
+        # Actualizar estilo del Treeview (tabla de resultados)
+        if hasattr(self, 'results_tree'):
+            treeview_style = 'Dark.Treeview' if self.dark_mode else 'Light.Treeview'
+            self.results_tree.configure(style=treeview_style)
+
+    def build_ui(self):
+        # Configurar estilos
+        style = ttk.Style()
+        style.theme_use('clam')  # 'clam' suele permitir más personalización de colores
+        
+        # Estilo para la barra de progreso (más ancha y verde)
+        style.configure("Green.Horizontal.TProgressbar",
+                        thickness=30,
+                        troughcolor='#E0E0E0',
+                        background='#4CAF50',
+                        borderwidth=0)
+        
+        # Estilo para botones azules (App Store style)
+        style.configure("Blue.TButton",
+                       background='#007AFF',
+                       foreground='white',
+                       borderwidth=0,
+                       focuscolor='none',
+                       relief='flat',
+                       padding=(20, 10))
+        style.map("Blue.TButton",
+                 background=[('active', '#0051D5'), ('pressed', '#0051D5')],
+                 foreground=[('active', 'white'), ('pressed', 'white')])
+        
+        # Estilos para Treeview (tabla de resultados)
+        # Estilo claro
+        style.configure("Light.Treeview",
+                       background='#fafafa',
+                       foreground='black',
+                       fieldbackground='#fafafa',
+                       borderwidth=0)
+        style.configure("Light.Treeview.Heading",
+                       background='#e0e0e0',
+                       foreground='black',
+                       relief='flat')
+        style.map("Light.Treeview.Heading",
+                 background=[('active', '#d0d0d0')])
+        
+        # Estilo oscuro
+        style.configure("Dark.Treeview",
+                       background='#1e1e1e',
+                       foreground='#e0e0e0',
+                       fieldbackground='#1e1e1e',
+                       borderwidth=0)
+        style.configure("Dark.Treeview.Heading",
+                       background='#2b2b2b',
+                       foreground='#e0e0e0',
+                       relief='flat')
+        style.map("Dark.Treeview.Heading",
+                 background=[('active', '#3a3a3a')])
+        
+        # Guardar referencia al estilo para poder cambiarlo después
+        self.style = style
+        
+        # Fuentes
+        # Fuentes (Aumentadas)
+        self.header_font = ('Segoe UI', 18, 'bold') if os.name == 'nt' else ('Helvetica', 18, 'bold')
+        self.normal_font = ('Segoe UI', 11) if os.name == 'nt' else ('Helvetica', 11)
+        self.bold_font = ('Segoe UI', 12, 'bold') if os.name == 'nt' else ('Helvetica', 12, 'bold')
+
+        # --- Menú ---
+        menubar = tk.Menu(self.root)
+        filemenu = tk.Menu(menubar, tearoff=0)
+        filemenu.add_command(label='Ajustes', command=self.open_settings)
+        filemenu.add_separator()
+        filemenu.add_command(label='Salir', command=self.on_exit)
+        menubar.add_cascade(label='Archivo', menu=filemenu)
+
+        helpmenu = tk.Menu(menubar, tearoff=0)
+        helpmenu.add_command(label='Acerca de', command=self.about)
+        menubar.add_cascade(label='Ayuda', menu=helpmenu)
+        self.root.config(menu=menubar)
+
+        # --- Contenedor Principal ---
+        self.main_frame = tk.Frame(self.root, bg='#f0f0f0')
+        self.main_frame.pack(fill='both', expand=True)
+        self.root.configure(bg='#f0f0f0')
+
+        # --- Header (Logo + Título) ---
+        self.header_frame = tk.Frame(self.main_frame, bg='#f0f0f0')
+        self.header_frame.pack(fill='x', pady=(20, 10), padx=20)
+
+        # Logo y botón de tema en la misma fila
+        self.logo_theme_frame = tk.Frame(self.header_frame, bg='#f0f0f0')
+        self.logo_theme_frame.pack(fill='x')
+        
+        # Logo (centrado)
+        logo_path = os.path.join(os.path.dirname(__file__), 'logo.png')
+        if os.path.exists(logo_path):
+            try:
+                logo_image = Image.open(logo_path)
+                logo_image = logo_image.resize((200, 100), Image.LANCZOS)
+                
+                # Redondear esquinas
+                try:
+                    logo_image = self.round_corners(logo_image, 15)
+                except Exception as e:
+                    print(f"Error redondeando logo: {e}")
+                
+                logo_photo = ImageTk.PhotoImage(logo_image)
+                self.logo_label = tk.Label(self.logo_theme_frame, image=logo_photo, bg='#f0f0f0')
+                self.logo_label.image = logo_photo
+                self.logo_label.pack(side='top', pady=(0, 10))
+            except Exception:
+                pass
+        
+        # Botón de tema (esquina superior derecha)
+        self.theme_btn = tk.Button(self.logo_theme_frame, text='🌙', font=('Segoe UI', 16), 
+                                   command=self.toggle_theme, width=3, height=1,
+                                   bg='#007AFF', fg='white', cursor='hand2',
+                                   relief='flat', borderwidth=0,
+                                   activebackground='#0051D5', activeforeground='white',
+                                   highlightbackground='#007AFF', highlightcolor='#007AFF')
+        self.theme_btn.place(relx=1.0, rely=0.0, anchor='ne')
+
+        # Título
+        title = tk.Label(self.header_frame, text='CONFIGURADOR DE ANTENAS UBIQUITI SIIP INTERNET', 
+                        font=self.header_font, bg='#f0f0f0', fg='#333333')
+        title.pack(side='top')
+
+        # --- Notebook (Pestañas) ---
+        self.notebook = ttk.Notebook(self.main_frame)
+        self.notebook.pack(fill='both', expand=True, padx=20, pady=(0, 10))
+        
+        # --- Pestaña 1: Proceso ---
+        self.tab_proceso = tk.Frame(self.notebook, bg='#f0f0f0')
+        self.notebook.add(self.tab_proceso, text='  Proceso  ')
+        
+        # --- Área de Control (Botón + Progreso) ---
+        self.control_frame = tk.LabelFrame(self.tab_proceso, text="Control de Proceso", font=self.bold_font, bg='#f0f0f0', fg='black', padx=15, pady=15)
+        self.control_frame.pack(fill='x', padx=20, pady=10)
+
+        # Contenedor para centrar el botón
+        self.btn_container = tk.Frame(self.control_frame, bg='#f0f0f0')
+        self.btn_container.pack(fill='x', pady=(0, 15))
+        
+        self.start_btn = ttk.Button(self.btn_container, text='Iniciar proceso de configuración', 
+                                   style='Blue.TButton',
+                                   command=self.toggle_process, cursor='hand2')
+        self.start_btn.pack(anchor='center', pady=10)
+
+        # Progress bar customizada
+        self.progress = ttk.Progressbar(self.control_frame, orient='horizontal', mode='determinate', style="Green.Horizontal.TProgressbar")
+        self.progress['maximum'] = self.total_antennas
+        self.progress['value'] = 0
+        self.progress.pack(fill='x')
+
+        # --- Área de Estado Visual (Iconos) ---
+        self.antennas_frame = tk.LabelFrame(self.tab_proceso, text="Estado de Antenas", font=self.bold_font, bg='#f0f0f0', fg='black', padx=15, pady=15)
+        self.antennas_frame.pack(fill='x', padx=20, pady=10)
+        
+        # Contenedor interno para centrar los iconos
+        self.icons_container = tk.Frame(self.antennas_frame, bg='#f0f0f0')
+        self.icons_container.pack(anchor='center')
+        
+        self.antenna_icons = []
+        self.antenna_points = []
+        
+        # Cargar imágenes
+        antenna_path = os.path.join(os.path.dirname(__file__), 'antena.png')
+        try:
+            img = Image.open(antenna_path).convert("RGBA")
+            img_normal = img.resize((48, 48), Image.LANCZOS)
+            img_gray = img.convert('LA').convert("RGBA").resize((48, 48), Image.LANCZOS)
+            self.antenna_photo_normal = ImageTk.PhotoImage(img_normal)
+            self.antenna_photo_fail = ImageTk.PhotoImage(img_gray)
+        except Exception:
+            self.antenna_photo_normal = None
+            self.antenna_photo_fail = None
+            
+        self.init_antenna_icons()
+
+        # --- Consola y Logs ---
+        # --- Consola y Logs ---
+        self.log_frame = tk.LabelFrame(self.tab_proceso, text="Registro de Actividad", font=self.bold_font, bg='#f0f0f0', fg='black', padx=10, pady=10)
+        self.log_frame.pack(fill='both', expand=True, padx=20, pady=(0, 10))
+
+        # Toolbar para el log
+        self.log_tools_frame = tk.Frame(self.log_frame, bg='#f0f0f0')
+        self.log_tools_frame.pack(fill='x', pady=(0, 5))
+        
+        self.copy_log_btn = tk.Button(self.log_tools_frame, text='Copiar Log', command=self.copy_console_log,
+                                     font=('Segoe UI', 9), bg='#007AFF', fg='white',
+                                     relief='flat', cursor='hand2', padx=10, pady=2)
+        self.copy_log_btn.pack(side='right')
+
+        self.console = ScrolledText(self.log_frame, height=10, wrap='word', font=('Consolas', 9), bg='#fafafa', fg='black')
+        self.console.pack(fill='both', expand=True)
+        self.console.configure(state='disabled')
+
+        # --- Pestaña 2: Resultados ---
+        self.tab_resultados = tk.Frame(self.notebook, bg='#f0f0f0')
+        self.notebook.add(self.tab_resultados, text='  Resultados  ')
+        
+        # Frame para resultados
+        results_container = tk.Frame(self.tab_resultados, bg='#f0f0f0')
+        results_container.pack(fill='both', expand=True, padx=20, pady=20)
+        
+        # Título y botón de copiar
+        header_frame = tk.Frame(results_container, bg='#f0f0f0')
+        header_frame.pack(fill='x', pady=(0, 10))
+        
+        tk.Label(header_frame, text='Resultados del Proceso', font=self.bold_font, bg='#f0f0f0', fg='black').pack(side='left')
+        self.copy_mac_btn = tk.Button(header_frame, text='Copiar MACs', command=self.copy_macs_to_clipboard, 
+                                      state='disabled', font=('Segoe UI', 10), bg='#007AFF', fg='white',
+                                      relief='flat', cursor='hand2', padx=15, pady=5)
+        self.copy_mac_btn.pack(side='right')
+        
+        # Tabla de resultados con Treeview
+        table_frame = tk.Frame(results_container, bg='#f0f0f0')
+        table_frame.pack(fill='both', expand=True)
+        
+        # Definir columnas
+        columns = ('ip_inicial', 'ip_final', 'mac', 'estado')
+        self.results_tree = ttk.Treeview(table_frame, columns=columns, show='headings', height=15, style='Light.Treeview')
+        
+        # Configurar encabezados
+        self.results_tree.heading('ip_inicial', text='IP Inicial')
+        self.results_tree.heading('ip_final', text='IP Final')
+        self.results_tree.heading('mac', text='MAC')
+        self.results_tree.heading('estado', text='Estado')
+        
+        # Configurar anchos de columnas
+        self.results_tree.column('ip_inicial', width=150, anchor='center')
+        self.results_tree.column('ip_final', width=150, anchor='center')
+        self.results_tree.column('mac', width=200, anchor='center')
+        self.results_tree.column('estado', width=120, anchor='center')
+        
+        # Scrollbar para la tabla
+        scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.results_tree.yview)
+        self.results_tree.configure(yscroll=scrollbar.set)
+        
+        self.results_tree.pack(side='left', fill='both', expand=True)
+        scrollbar.pack(side='right', fill='y')
+
+        # --- Barra de Estado Inferior ---
+        self.status_bar = tk.Frame(self.root, bg='#e0e0e0', height=25)
+        self.status_bar.pack(side='bottom', fill='x')
+        
+        status = tk.Label(self.status_bar, textvariable=self.status_var, bg='#e0e0e0', font=('Segoe UI', 9), anchor='w', padx=10)
+        status.pack(side='left')
+
+    def init_antenna_icons(self):
+        self.progress['maximum'] = self.total_antennas
+        self.progress['value'] = 0
+        self.completed_antennas = 0
+        self.active_idx = 0 # Reset al iniciar proceso visual
+        for w in getattr(self, 'antenna_icons', []):
+            w.destroy()
+        for w in getattr(self, 'antenna_points', []):
+            w.destroy()
+        self.antenna_icons = []
+        self.antenna_points = []
+        
+        # Usar icons_container en lugar de antennas_frame directo
+        target_frame = getattr(self, 'icons_container', self.antennas_frame)
+        
+        # Colores que se ven bien en ambos temas
+        inactive_fill = '#505050' if self.dark_mode else '#d0d0d0'
+        inactive_outline = '#707070' if self.dark_mode else '#a0a0a0'
+        theme = self.themes['dark'] if self.dark_mode else self.themes['light']
+        
+        max_icons = min(self.total_antennas, 8)
+        for i in range(max_icons):
+            lbl = tk.Label(target_frame, image=self.antenna_photo_normal, bg=theme['frame_bg'])
+            lbl.grid(row=0, column=i, padx=8)
+            self.antenna_icons.append(lbl)
+            cnv = tk.Canvas(target_frame, width=16, height=18, highlightthickness=0, bg=theme['frame_bg'])
+            cnv.create_oval(2,4,14,16, fill=inactive_fill, outline=inactive_outline)
+            cnv.grid(row=1, column=i)
+            self.antenna_points.append(cnv)
+
+    def update_antenna_icon(self, estado):
+        i = getattr(self, 'active_idx', 0)
+        if 0 <= i < len(self.antenna_points):
+            canvas = self.antenna_points[i]
+            if estado == "ok":
+                # Siempre rellena barra a 100% antes de pasar
+                self.update_progress_fraction(1.0)
+                self.antenna_icons[i]['image'] = self.antenna_photo_normal
+                canvas.delete("all")
+                canvas.create_oval(2,4,14,16, fill='#14c714', outline='green')
+                self.active_idx += 1
+            elif estado == "fail":
+                self.update_progress_fraction(1.0)
+                self.antenna_icons[i]['image'] = self.antenna_photo_fail
+                canvas.delete("all")
+                canvas.create_oval(2,4,14,16, fill='#fa1e1e', outline='darkred')
+                self.active_idx += 1
+            else:
+                # Colores que se ven bien en ambos temas
+                inactive_fill = '#505050' if self.dark_mode else '#d0d0d0'
+                inactive_outline = '#707070' if self.dark_mode else '#a0a0a0'
+                self.antenna_icons[i]['image'] = self.antenna_photo_normal
+                canvas.delete("all")
+                canvas.create_oval(2,4,14,16, fill=inactive_fill, outline=inactive_outline)
+            self.root.update_idletasks()
+
+
+    def open_settings(self):
+        # Evita ventana doble de ajustes
+        if hasattr(self, 'ajustes_window') and self.ajustes_window is not None and self.ajustes_window.winfo_exists():
+            self.ajustes_window.lift()
+            self.ajustes_window.focus_set()
+            return
+        win = tk.Toplevel(self.root)
+        win.title('Ajustes')
+        win.transient(self.root)
+        self.ajustes_window = win
+
+        tk.Label(win, text='Archivo firmware:').grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        firmware_var = tk.StringVar(value=self.settings.get('archivo_firmware', ''))
+        fw_entry = tk.Entry(win, textvariable=firmware_var, width=60)
+        fw_entry.grid(row=0, column=1, padx=5, pady=5)
+        tk.Button(win, text='Seleccionar...', command=lambda: self.select_firmware(firmware_var)).grid(row=0, column=2, padx=5, pady=5)
+
+        tk.Label(win, text='Backup .cfg:').grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        backup_var = tk.StringVar(value=self.settings.get('backup_cfg', ''))
+        backup_entry = tk.Entry(win, textvariable=backup_var, width=60)
+        backup_entry.grid(row=1, column=1, padx=5, pady=5)
+        tk.Button(win, text='Seleccionar...', command=lambda: self.select_backup(backup_var)).grid(row=1, column=2, padx=5, pady=5)
+
+        tk.Label(win, text='Rango inicio (octeto):').grid(row=2, column=0, sticky='e', padx=5, pady=5)
+        start_var = tk.IntVar(value=self.settings.get('range_start', 11))
+        tk.Entry(win, textvariable=start_var, width=10).grid(row=2, column=1, sticky='w', padx=5, pady=5)
+
+        tk.Label(win, text='Rango fin (octeto):').grid(row=3, column=0, sticky='e', padx=5, pady=5)
+        end_var = tk.IntVar(value=self.settings.get('range_end', 18))
+        tk.Entry(win, textvariable=end_var, width=10).grid(row=3, column=1, sticky='w', padx=5, pady=5)
+
+        modo_frame = tk.Frame(win)
+        modo_frame.grid(row=4, column=0, columnspan=3, pady=8, sticky='w')
+        tk.Label(modo_frame, text='Modo de operación:').pack(side='left', padx=3)
+        modo_var = tk.StringVar(value=self.settings.get('modo_flujo', 'full'))
+        tk.Radiobutton(modo_frame, text='Configurar y actualizar', variable=modo_var, value='full').pack(side='left')
+        tk.Radiobutton(modo_frame, text='Sólo configurar', variable=modo_var, value='config').pack(side='left')
+
+        def apply_and_close():
+            self.settings['archivo_firmware'] = firmware_var.get()
+            self.settings['backup_cfg'] = backup_var.get()
+            self.settings['modo_flujo'] = modo_var.get()
+            try:
+                self.settings['range_start'] = int(start_var.get())
+                self.settings['range_end'] = int(end_var.get())
+            except Exception:
+                messagebox.showwarning('Error', 'Rango inválido')
+                return
+            self.save_settings()
+            self.total_antennas = max(1, self.settings['range_end'] - self.settings['range_start'] + 1)
+            self.progress['maximum'] = self.total_antennas
+            win.destroy()
+            self.ajustes_window = None
+
+        def on_close():
+            self.ajustes_window = None
+            win.destroy()
+        win.protocol("WM_DELETE_WINDOW", on_close)
+
+        btn_frame = tk.Frame(win)
+        btn_frame.grid(row=10, column=0, columnspan=3, pady=10)
+        tk.Button(btn_frame, text='Guardar', command=apply_and_close).pack(side='left', padx=5)
+        tk.Button(btn_frame, text='Cancelar', command=win.destroy).pack(side='left', padx=5)
+
+    def select_firmware(self, var):
+        path = filedialog.askopenfilename(title='Seleccionar firmware', filetypes=[('BIN files', '*.bin'), ('All files','*.*')])
+        if path:
+            var.set(path)
+
+    def select_backup(self, var):
+        path = filedialog.askopenfilename(title='Seleccionar backup .cfg', filetypes=[('CFG files', '*.cfg'), ('All files','*.*')])
+        if path:
+            var.set(path)
+
+    def about(self):
+        messagebox.showinfo('Acerca de', 'Autor: Daniel Humberto Soto Villegas (2025)\nEmpresa: SIIP INTERNET')
+
+    def on_exit(self):
+        if self.running:
+            if not messagebox.askyesno('Confirmar', 'Hay un proceso en ejecución. ¿Deseas salir y cancelar el proceso?'):
+                return
+            self.request_cancel()
+        self.root.quit()
+
+    def toggle_process(self):
+        if not self.running:
+            self.start_process()
+        else:
+            # Ask for confirmation to cancel
+            if messagebox.askyesno('Confirmar cancelación', '¿Deseas realmente cancelar el proceso?'):
+                self.request_cancel()
+
+    def append_console(self, text):
+        self.console.configure(state='normal')
+        self.console.insert('end', text)
+        self.console.see('end')
+        self.console.configure(state='disabled')
+
+    def flush_queue(self):
+        try:
+            while True:
+                item = self.queue.get_nowait()
+                typ, data = item
+                if typ == 'line':
+                    # Filtrar etiquetas internas de la GUI para que no salgan en la consola
+                    if '[GUI]' not in data:
+                        self.append_console(data)
+                    # Parsear siempre, incluso si no se muestra
+                    self.parse_progress(data)
+                elif typ == 'finished':
+                    self.append_console('\nProceso finalizado.\n')
+                    self.on_process_finished()
+                elif typ == 'error':
+                    self.append_console(f'\nERROR: {data}\n')
+        except queue.Empty:
+            pass
+        self.root.after(100, self.flush_queue)
+
+    def parse_progress(self, line):
+        # Detectar inicio de antena (opcional, para debug o validación)
+        if '[GUI] START_ANTENNA:' in line:
+            # Resetear fase actual para esta antena
+            self.current_phase = None
+            self.current_phase_progress = 0
+            
+        # Detectar fin de antena con estado explícito
+        if '[GUI] END_ANTENNA:' in line:
+            try:
+                parts = line.split(':', 1)[1].strip().split(',')
+                if len(parts) >= 2:
+                    ip = parts[0].strip()
+                    status = parts[1].strip()
+                    # Actualizar icono y progreso
+                    self.update_antenna_icon(status)
+                    
+                    self.completed_antennas += 1
+                    self.progress['value'] = self.completed_antennas
+                    self.status_var.set(f'Antenas completadas: {self.completed_antennas}/{self.total_antennas}')
+            except Exception as e:
+                print(f"Error parsing END_ANTENNA: {e}")
+
+        # Parse [GUI] PHASE_PROGRESS: <phase_name>, <percentage>
+        if '[GUI] PHASE_PROGRESS:' in line:
+            try:
+                content = line.split(':', 1)[1].strip()
+                parts = content.split(',')
+                if len(parts) >= 2:
+                    phase_name = parts[0].strip()
+                    phase_percent = int(parts[1].strip())
+                    
+                    # Definir pesos de cada fase según el modo
+                    # Estos pesos suman 100% para una antena completa
+                    if hasattr(self, 'settings') and self.settings.get('modo_flujo') == 'config':
+                        # Modo solo configurar (sin actualización)
+                        phase_weights = {
+                            'detection': (0, 10),      # 0-10%
+                            'web_config': (10, 40),    # 10-40%  (no se usa en config, pero por si acaso)
+                            'ssh_config': (40, 70),    # 40-70%
+                            'reboot': (70, 100)        # 70-100%
+                        }
+                    else:
+                        # Modo full (configurar y actualizar)
+                        phase_weights = {
+                            'detection': (0, 5),           # 0-5%
+                            'web_config': (5, 20),         # 5-20%
+                            'ssh_config': (20, 35),        # 20-35%
+                            'reboot': (35, 45),            # 35-45%
+                            'firmware_update': (45, 100)   # 45-100%
+                        }
+                    
+                    if phase_name in phase_weights:
+                        start_percent, end_percent = phase_weights[phase_name]
+                        # Calcular progreso dentro de esta antena
+                        antenna_progress = start_percent + (phase_percent / 100.0) * (end_percent - start_percent)
+                        
+                        # Calcular progreso total
+                        total_progress = self.completed_antennas + (antenna_progress / 100.0)
+                        self.progress['value'] = min(self.total_antennas, total_progress)
+                        
+                        # Actualizar estado
+                        phase_names_es = {
+                            'detection': 'Detectando',
+                            'web_config': 'Configurando web',
+                            'ssh_config': 'Configurando SSH',
+                            'reboot': 'Reiniciando',
+                            'firmware_update': 'Actualizando firmware'
+                        }
+                        phase_display = phase_names_es.get(phase_name, phase_name)
+                        self.status_var.set(f'{phase_display} ({int(antenna_progress)}%)')
+            except Exception as e:
+                print(f"Error parsing PHASE_PROGRESS: {e}")
+
+        # Parse [GUI] PROGRESS: <seconds_remaining> (legacy, para compatibilidad)
+        if '[GUI] PROGRESS:' in line:
+            try:
+                parts = line.split(':', 1)[1].strip()
+                rem = int(parts)
+                # Este tag ahora es redundante con PHASE_PROGRESS, pero lo mantenemos por si acaso
+                # No hacemos nada aquí porque PHASE_PROGRESS ya maneja el progreso
+            except Exception:
+                pass
+
+        # Detectar lista de IPs para ajustar el número de iconos
+        if 'IPs activas encontradas:' in line:
+            try:
+                # Esperamos algo como: IPs activas encontradas: ['192.168.1.12', '192.168.1.13']
+                content = line.split(':', 1)[1].strip()
+                # Limpieza básica para evaluar la lista
+                import ast
+                ips = ast.literal_eval(content)
+                if isinstance(ips, list) and len(ips) > 0:
+                    self.total_antennas = len(ips)
+                    # Re-inicializar iconos en el hilo principal
+                    self.root.after(0, self.init_antenna_icons)
+            except Exception as e:
+                print(f"Error parsing IPs: {e}")
+
+    def start_process(self):
+        # Save settings before starting
+        self.save_settings()
+        self.console.configure(state='normal')
+        self.console.delete('1.0', 'end')
+        self.console.configure(state='disabled')
+        self.progress['maximum'] = self.total_antennas
+        self.progress['value'] = 0
+        self.completed_antennas = 0
+        self.active_idx = 0
+        self.start_btn.config(text='Cancelar proceso')
+        self.running = True
+        self.status_var.set('Ejecutando...')
+        # Disable menu items? (not necessary)
+        # Launch thread
+        self.proc_thread = threading.Thread(target=self.run_subprocess, daemon=True)
+        self.proc_thread.start()
+
+
+    def run_subprocess(self):
+        env = os.environ.copy()
+        env['ARCHIVO_LOCAL_FW'] = self.settings.get('archivo_firmware', env.get('ARCHIVO_LOCAL_FW', ''))
+        env['BACKUP_CFG'] = self.settings.get('backup_cfg', env.get('BACKUP_CFG', ''))
+        env['MODO_FLUJO'] = self.settings.get('modo_flujo', 'full')
+        env['PYTHONUNBUFFERED'] = '1'
+
+        cmd = [sys.executable, os.path.join(os.getcwd(), 'configuracion_completa_antenas2.py')]
+        try:
+            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)
+            # Debug: confirmar que el proceso inició
+            self.queue.put(('line', f'[DEBUG] Proceso iniciado con PID: {self.proc.pid}\n'))
+        except Exception as e:
+            self.queue.put(('error', f'No se pudo ejecutar el script: {e}'))
+            self.queue.put(('finished', None))
+            self.proc = None
+            return
+
+        self.root.after(0, self.init_antenna_icons)  # Siempre resetea a gris al iniciar
+        self.active_idx = 0
+        total_detected = 0
+        working = False
+        macs_encontradas = []
+        
+        # Debug: confirmar que vamos a leer stdout
+        self.queue.put(('line', '[DEBUG] Iniciando lectura de stdout...\n'))
+        
+        for line in self.proc.stdout:
+            self.queue.put(('line', line))
+            lowered = line.lower()
+            # Guardar MAC
+            if 'mac:' in lowered:
+                import re
+                m = re.search(r'mac:\s*(\w{12,})', lowered)
+                if m:
+                    macs_encontradas.append(m.group(1))
+            # Detecta el inicio de configuración real desde el log especial
+            if '[gui] iniciando_configuracion_ip:' in lowered:
+                self.root.after(0, self._update_naranja)
+                self.root.after(0, self.update_progress_fraction, 0.0)
+                working = True
+            elif '✅ botón guardar presionado' in lowered or 'configuración inicial completada' in lowered:
+                self.root.after(0, self.update_progress_fraction, 0.1)
+            elif '✅ fase 1 completada' in lowered:
+                self.root.after(0, self.update_progress_fraction, 0.2)
+            elif 'archivo transferido exitosamente' in lowered:
+                self.root.after(0, self.update_progress_fraction, 0.3)
+            elif '✅ comando de actualización enviado exitosamente' in lowered:
+                self.root.after(0, self.update_progress_fraction, 0.4)
+            elif 'tiempo restante: 100 segundos' in lowered:
+                self.root.after(0, self.update_progress_fraction, 0.5)
+            elif 'tiempo restante:  55 segundos' in lowered:
+                self.root.after(0, self.update_progress_fraction, 0.6)
+            elif '[verificación] esperando a que responda' in lowered:
+                self.root.after(0, self.update_progress_fraction, 0.7)
+            elif '✅ ssh disponible en' in lowered:
+                self.root.after(0, self.update_progress_fraction, 0.8)
+            elif 'interfaz web completamente cargada en' in lowered:
+                self.root.after(0, self.update_progress_fraction, 0.9)
+            elif '🎉 ¡actualización completada exitosamente!' in lowered:
+                self.root.after(0, self.update_progress_fraction, 1.0)
+            elif ('proceso completado para antena en' in lowered or \
+                  '🎉 ¡actualización completada exitosamente!' in lowered or \
+                  'actualizacion completada exitosamente' in lowered):
+                if working:  # Si hubo working=True, entonces pone en verde
+                    self.root.after(0, self.update_antenna_icon, "ok")
+                    total_detected += 1
+                    self.root.after(0, self.progress.stop)
+                    self.root.after(0, lambda: self.progress.config(mode='determinate'))
+                    self.root.after(0, self._set_progress, total_detected)
+                    working = False
+            elif ('❌ error en antena' in lowered or '❌ error: la antena no se pudo' in lowered or 'error: el archivo' in lowered):
+                if working:
+                    self.root.after(0, self.update_antenna_icon, "fail")
+                    total_detected += 1
+                    self.root.after(0, self.progress.stop)
+                    self.root.after(0, lambda: self.progress.config(mode='determinate'))
+                    self.root.after(0, self._set_progress, total_detected)
+                    working = False
+        rc = self.proc.wait()
+        self.root.after(0, self.show_mac_summary, macs_encontradas)
+        self.queue.put(('line', f'\n[Proceso terminado con código {rc}]\n'))
+        self.root.after(0, self.progress.stop)
+        self.root.after(0, lambda: self.progress.config(mode='determinate'))
+        self.queue.put(('finished', None))
+        self.proc = None
+
+    def _set_progress(self, value):
+        self.completed_antennas = value
+        self.progress['maximum'] = self.total_antennas
+        self.progress['value'] = value
+        self.status_var.set(f'Antenas completadas: {self.completed_antennas}/{self.total_antennas}')
+
+
+    def request_cancel(self):
+        if self.proc and self.proc.poll() is None:
+            try:
+                # Try to send SIGINT first
+                if os.name == 'posix':
+                    self.proc.send_signal(signal.SIGINT)
+                else:
+                    self.proc.terminate()
+                # give it a second, then kill
+                time.sleep(1)
+                if self.proc.poll() is None:
+                    self.proc.kill()
+            except Exception:
+                try:
+                    self.proc.kill()
+                except Exception:
+                    pass
+        # After cancel, try to show partial summary if CSV exists
+        csv_path = os.path.join(os.getcwd(), 'resultados_antenas.csv')
+        if os.path.exists(csv_path):
+            try:
+                with open(csv_path, 'r', encoding='utf-8') as f:
+                    data = f.read()
+                self.queue.put(('line', '\n--- Resumen parcial (CSV) ---\n'))
+                self.queue.put(('line', data + '\n'))
+            except Exception as e:
+                self.queue.put(('line', f'No se pudo leer CSV: {e}\n'))
+
+    def on_process_finished(self):
+        self.running = False
+        self.start_btn.config(text='Iniciar proceso')
+        self.status_var.set('Terminado')
+        # Try to show final CSV if present
+        csv_path = os.path.join(os.getcwd(), 'resultados_antenas.csv')
+        if os.path.exists(csv_path):
+            try:
+                with open(csv_path, 'r', encoding='utf-8') as f:
+                    data = f.read()
+                self.append_console('\n--- Resumen final (CSV) ---\n')
+                self.append_console(data + '\n')
+            except Exception:
+                pass
+
+
+if __name__ == '__main__':
+    root = tk.Tk()
+    root.title('Configurador de antenas SIIP INTERNET')
+    w, h = 800, 700
+    root.geometry(f'{w}x{h}')
+    root.update_idletasks()
+    ws = root.winfo_screenwidth()
+    hs = root.winfo_screenheight()
+    x = (ws // 2) - (w // 2)
+    y = (hs // 2) - (h // 2)
+    root.geometry(f'{w}x{h}+{x}+{y}')
+    try:
+        icon_path = os.path.join(os.path.dirname(__file__), 'icono.png')
+        icon_img = Image.open(icon_path)
+        icon_tk = ImageTk.PhotoImage(icon_img)
+        root.iconphoto(True, icon_tk)
+    except Exception as e:
+        print(f'No se pudo establecer el icono de la ventana: {e}')
+    app = GuiConfig(root)
+    root.mainloop()
