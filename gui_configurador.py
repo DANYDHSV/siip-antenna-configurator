@@ -847,6 +847,8 @@ class GuiConfig:
             # Resetear fase actual para esta antena
             self.current_phase = None
             self.current_phase_progress = 0
+            # Poner icono en naranja (en progreso)
+            self._update_naranja()
             
         # Detectar fin de antena con estado explícito
         if '[GUI] END_ANTENNA:' in line:
@@ -946,6 +948,7 @@ class GuiConfig:
         self.console.configure(state='normal')
         self.console.delete('1.0', 'end')
         self.console.configure(state='disabled')
+        self.progress.configure(mode='determinate')
         self.progress['maximum'] = self.total_antennas
         self.progress['value'] = 0
         self.completed_antennas = 0
@@ -995,49 +998,6 @@ class GuiConfig:
                 m = re.search(r'mac:\s*(\w{12,})', lowered)
                 if m:
                     macs_encontradas.append(m.group(1))
-            # Detecta el inicio de configuración real desde el log especial
-            if '[gui] iniciando_configuracion_ip:' in lowered:
-                self.root.after(0, self._update_naranja)
-                self.root.after(0, self.update_progress_fraction, 0.0)
-                working = True
-            elif '✅ botón guardar presionado' in lowered or 'configuración inicial completada' in lowered:
-                self.root.after(0, self.update_progress_fraction, 0.1)
-            elif '✅ fase 1 completada' in lowered:
-                self.root.after(0, self.update_progress_fraction, 0.2)
-            elif 'archivo transferido exitosamente' in lowered:
-                self.root.after(0, self.update_progress_fraction, 0.3)
-            elif '✅ comando de actualización enviado exitosamente' in lowered:
-                self.root.after(0, self.update_progress_fraction, 0.4)
-            elif 'tiempo restante: 100 segundos' in lowered:
-                self.root.after(0, self.update_progress_fraction, 0.5)
-            elif 'tiempo restante:  55 segundos' in lowered:
-                self.root.after(0, self.update_progress_fraction, 0.6)
-            elif '[verificación] esperando a que responda' in lowered:
-                self.root.after(0, self.update_progress_fraction, 0.7)
-            elif '✅ ssh disponible en' in lowered:
-                self.root.after(0, self.update_progress_fraction, 0.8)
-            elif 'interfaz web completamente cargada en' in lowered:
-                self.root.after(0, self.update_progress_fraction, 0.9)
-            elif '🎉 ¡actualización completada exitosamente!' in lowered:
-                self.root.after(0, self.update_progress_fraction, 1.0)
-            elif ('proceso completado para antena en' in lowered or \
-                  '🎉 ¡actualización completada exitosamente!' in lowered or \
-                  'actualizacion completada exitosamente' in lowered):
-                if working:  # Si hubo working=True, entonces pone en verde
-                    self.root.after(0, self.update_antenna_icon, "ok")
-                    total_detected += 1
-                    self.root.after(0, self.progress.stop)
-                    self.root.after(0, lambda: self.progress.config(mode='determinate'))
-                    self.root.after(0, self._set_progress, total_detected)
-                    working = False
-            elif ('❌ error en antena' in lowered or '❌ error: la antena no se pudo' in lowered or 'error: el archivo' in lowered):
-                if working:
-                    self.root.after(0, self.update_antenna_icon, "fail")
-                    total_detected += 1
-                    self.root.after(0, self.progress.stop)
-                    self.root.after(0, lambda: self.progress.config(mode='determinate'))
-                    self.root.after(0, self._set_progress, total_detected)
-                    working = False
         rc = self.proc.wait()
         self.root.after(0, self.show_mac_summary, macs_encontradas)
         self.queue.put(('line', f'\n[Proceso terminado con código {rc}]\n'))
@@ -1097,6 +1057,15 @@ class GuiConfig:
                 pass
 
 
+    def _update_naranja(self):
+        """Pone el icono actual en naranja (en proceso) sin avanzar el índice."""
+        i = getattr(self, 'completed_antennas', 0)
+        if 0 <= i < len(self.antenna_points):
+            canvas = self.antenna_points[i]
+            canvas.delete("all")
+            # Naranja vibrante para visibilidad
+            canvas.create_oval(2,4,14,16, fill='#FFA500', outline='#FF8C00')
+            
 if __name__ == '__main__':
     root = tk.Tk()
     root.title('Configurador de antenas SIIP INTERNET')

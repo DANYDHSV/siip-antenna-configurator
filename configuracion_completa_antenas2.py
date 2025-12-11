@@ -671,6 +671,7 @@ def run_all(range_start=11, range_end=18, backup_cfg=None, archivo_local_fw=None
     for IP_INICIAL in lista_ips:
         print(f"\n{'='*80}")
         print(f"PROCESANDO ANTENA EN {IP_INICIAL}")
+        print(f"[GUI] START_ANTENNA: {IP_INICIAL}")
         print(f"{'='*80}")
 
         try:
