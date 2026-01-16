@@ -603,7 +603,12 @@ def run_all(range_start=11, range_end=18, backup_cfg=None, archivo_local_fw=None
     m = re.search(r'v(\d+\.\d+\.\d+)', ARCHIVO_LOCAL_FW)
     VERSION_ESPERADA = m.group(1) if m else None
 
-    print("🚀 INICIANDO PROCESO COMPLETO DE CONFIGURACIÓN Y ACTUALIZACIÓN")
+    if modo_flujo == 'update_only':
+        print("🚀 INICIANDO PROCESO DE SÓLO ACTUALIZACIÓN DE FIRMWARE")
+    elif modo_flujo == 'config':
+        print("🚀 INICIANDO PROCESO DE SÓLO CONFIGURACIÓN (SIN UPDATE)")
+    else:
+        print("🚀 INICIANDO PROCESO COMPLETO DE CONFIGURACIÓN Y ACTUALIZACIÓN")
     print("="*60)
 
     # Verificaciones iniciales
@@ -641,7 +646,7 @@ def run_all(range_start=11, range_end=18, backup_cfg=None, archivo_local_fw=None
     print()
 
     print("="*60)
-    print("📡 FASE 1: CONFIGURACIÓN SECUENCIAL DE TODAS LAS ANTENAS EN EL RANGO")
+    print("📡 FASE 1: DETECCIÓN Y PROCESAMIENTO SECUENCIAL DE ANTENAS EN RANGO")
     print("="*60)
 
 
@@ -674,11 +679,15 @@ def run_all(range_start=11, range_end=18, backup_cfg=None, archivo_local_fw=None
         print(f"[GUI] START_ANTENNA: {IP_INICIAL}")
         print(f"{'='*80}")
 
-        try:
-            octeto = int(IP_INICIAL.split('.')[-1])
-        except Exception:
-            octeto = 0
-        IP_FINAL = f"192.168.1.{octeto-10}" if octeto > 10 else '192.168.1.1'
+        if modo_flujo == 'update_only':
+            IP_FINAL = IP_INICIAL
+            print(f"   Modo 'Solo Actualizar': Asumiendo IP final como {IP_FINAL}")
+        else:
+            try:
+                octeto = int(IP_INICIAL.split('.')[-1])
+            except Exception:
+                octeto = 0
+            IP_FINAL = f"192.168.1.{octeto-10}" if octeto > 10 else '192.168.1.1'
 
 
         # Notificar visual (compatibilidad con GUI que parsea stdout)
@@ -709,6 +718,7 @@ def run_all(range_start=11, range_end=18, backup_cfg=None, archivo_local_fw=None
         driver = None
         exito_actualizacion = False
         error_txt = ''
+        mac_address = "Desconocida"
 
         try:
             print("\n--- FASE 1: Configuración Inicial ---")
@@ -718,51 +728,54 @@ def run_all(range_start=11, range_end=18, backup_cfg=None, archivo_local_fw=None
             esperar_web(IP_INICIAL, puerto=443)
             print("[GUI] PHASE_PROGRESS: detection, 100")
 
-            if modo_flujo == 'full':
-                print("\n2. Realizando configuración web inicial...")
-                print("[GUI] PHASE_PROGRESS: web_config, 0")
-                configurar_inicial(IP_INICIAL)
-                print("[GUI] PHASE_PROGRESS: web_config, 100")
+            # FASE 1 Solo si NO es update_only
+            if modo_flujo != 'update_only':
+                if modo_flujo == 'full':
+                    print("\n2. Realizando configuración web inicial...")
+                    print("[GUI] PHASE_PROGRESS: web_config, 0")
+                    configurar_inicial(IP_INICIAL)
+                    print("[GUI] PHASE_PROGRESS: web_config, 100")
 
-            print("\n3. Aplicando configuración por SSH...")
-            print("[GUI] PHASE_PROGRESS: ssh_config, 0")
-            esperar_ssh(IP_INICIAL)
-            ssh = conectar(IP_INICIAL)
-            print("[GUI] PHASE_PROGRESS: ssh_config, 30")
-            cfg_temporal = modificar_cfg_para_ip(BACKUP_CFG, IP_FINAL)
-            subir_cfg(ssh, cfg_temporal)
-            print("[GUI] PHASE_PROGRESS: ssh_config, 70")
-            aplicar_cfg_y_reiniciar(ssh)
-            print("[GUI] PHASE_PROGRESS: ssh_config, 100")
+                print("\n3. Aplicando configuración por SSH...")
+                print("[GUI] PHASE_PROGRESS: ssh_config, 0")
+                esperar_ssh(IP_INICIAL)
+                ssh = conectar(IP_INICIAL)
+                print("[GUI] PHASE_PROGRESS: ssh_config, 30")
+                cfg_temporal = modificar_cfg_para_ip(BACKUP_CFG, IP_FINAL)
+                subir_cfg(ssh, cfg_temporal)
+                print("[GUI] PHASE_PROGRESS: ssh_config, 70")
+                aplicar_cfg_y_reiniciar(ssh)
+                print("[GUI] PHASE_PROGRESS: ssh_config, 100")
 
-            try:
-                ssh.close()
-            except:
-                pass
-            ssh = None
+                try:
+                    ssh.close()
+                except:
+                    pass
+                ssh = None
 
-            try:
-                if os.path.exists(cfg_temporal):
-                    os.remove(cfg_temporal)
-                    cfg_temporal = None
-            except:
-                pass
+                try:
+                    if os.path.exists(cfg_temporal):
+                        os.remove(cfg_temporal)
+                        cfg_temporal = None
+                except:
+                    pass
 
-            print(f"\n4. Esperando que la antena reinicie con IP {IP_FINAL}...")
-            print("[GUI] PHASE_PROGRESS: reboot, 0")
-            esperar_ping(IP_FINAL)
-            print("[GUI] PHASE_PROGRESS: reboot, 40")
-            esperar_web(IP_FINAL, puerto=443)
-            print("[GUI] PHASE_PROGRESS: reboot, 70")
-            esperar_ssh(IP_FINAL)
-            print("[GUI] PHASE_PROGRESS: reboot, 100")
-            print(f"✅ FASE 1 COMPLETADA: Antena configurada y lista en {IP_FINAL}")
+                print(f"\n4. Esperando que la antena reinicie con IP {IP_FINAL}...")
+                print("[GUI] PHASE_PROGRESS: reboot, 0")
+                esperar_ping(IP_FINAL)
+                print("[GUI] PHASE_PROGRESS: reboot, 40")
+                esperar_web(IP_FINAL, puerto=443)
+                print("[GUI] PHASE_PROGRESS: reboot, 70")
+                esperar_ssh(IP_FINAL)
+                print("[GUI] PHASE_PROGRESS: reboot, 100")
+                print(f"✅ FASE 1 COMPLETADA: Antena configurada y lista en {IP_FINAL}")
             
             # Si estamos en modo 'config', consideramos esto un éxito parcial (o total para ese modo)
             if modo_flujo == 'config':
                 exito_actualizacion = True
 
-            if modo_flujo == 'full':
+            # FASE 2: ACTUALIZACION (Full o Update Only)
+            if modo_flujo == 'full' or modo_flujo == 'update_only':
                 try:
                     print("\n" + "="*60)
                     print("🔧 FASE 2: ACTUALIZACIÓN DE FIRMWARE")

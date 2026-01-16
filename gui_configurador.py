@@ -101,10 +101,51 @@ def ensure_gui_dependencies():
 ensure_gui_dependencies()
 
 # Importar módulos necesarios
+# Reorganizado para incluir los nuevos imports y evitar duplicados
+import csv
+import re
+import socket
+
+# Para la GUI
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from tkinter.scrolledtext import ScrolledText
 from PIL import Image, ImageTk, ImageDraw, ImageChops
+
+# Para redireccionar salida de hilos
+import io
+from contextlib import contextmanager
+
+def resource_path(relative_path):
+    """ Obtiene la ruta absoluta al recurso, funciona para dev y PyInstaller """
+    try:
+        # PyInstaller crea una carpeta temporal y guarda la ruta en _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+class QueueRedirector:
+    """ Redirecciona stdout a una cola para que la GUI la procese """
+    def __init__(self, queue):
+        self.queue = queue
+    def write(self, string):
+        if string and string.strip():
+            self.queue.put(('line', string + '\n'))
+    def flush(self):
+        pass
+
+@contextmanager
+def redirect_stdout_to_queue(queue):
+    old_stdout = sys.stdout
+    sys.stdout = QueueRedirector(queue)
+    try:
+        yield
+    finally:
+        sys.stdout = old_stdout
+
+# Importar el backend para ejecución directa (mejor para el empaquetado)
+import configuracion_completa_antenas2
 
 SETTINGS_FILE = 'gui_settings.json'
 DEFAULT_SETTINGS = {
@@ -177,14 +218,20 @@ class GuiConfig:
             self.copy_mac_btn.config(state='disabled')
     def copy_macs_to_clipboard(self):
         """Copia todas las MACs de la tabla al portapapeles"""
+        import re
         macs = []
+        # Regex flexible para MACs (con o sin dos puntos, 12 caracteres hex)
+        mac_regex = re.compile(r'^[0-9a-fA-F]{2}[:\-]?[0-9a-fA-F]{2}[:\-]?[0-9a-fA-F]{2}[:\-]?[0-9a-fA-F]{2}[:\-]?[0-9a-fA-F]{2}[:\-]?[0-9a-fA-F]{2}$')
+        mac_simple = re.compile(r'^[0-9a-fA-F]{12}$') # Para formato sin separadores
+        
         for item in self.results_tree.get_children():
             values = self.results_tree.item(item)['values']
             if len(values) >= 3:
-                mac = values[2]  # La MAC está en la tercera columna
-                if mac and mac != 'No disponible':
+                mac = str(values[2]).strip()  # La MAC está en la tercera columna
+                # Validar que parezca una MAC real y no un mensaje de error
+                if (mac_regex.match(mac) or mac_simple.match(mac)) and 'disponible' not in mac.lower() and 'desconocida' not in mac.lower():
                     macs.append(mac)
-        
+    
         if macs:
             mac_text = '\n'.join(macs)
             self.root.clipboard_clear()
@@ -193,7 +240,7 @@ class GuiConfig:
             # Opcional: mostrar mensaje de confirmación
             self.status_var.set(f'Copiadas {len(macs)} MACs al portapapeles')
         else:
-            self.status_var.set('No hay MACs para copiar')
+            self.status_var.set('No hay MACs válidas para copiar')
 
     def copy_console_log(self):
         """Copia el contenido de la consola al portapapeles"""
@@ -416,8 +463,8 @@ class GuiConfig:
                         elif isinstance(subchild, tk.Label):
                             subchild.configure(bg=theme['bg'], fg=theme['fg'])
                         elif isinstance(subchild, tk.Button):
-                            # Botón de copiar MACs
-                            subchild.configure(bg=theme['button_bg'], fg=theme['button_fg'])
+                            # Botón de copiar MACs - Estilo fijo solicitado: Gris con letras blancas
+                            subchild.configure(bg='#808080', fg='white')
         
         # Actualizar estilo del Treeview (tabla de resultados)
         if hasattr(self, 'results_tree'):
@@ -445,8 +492,8 @@ class GuiConfig:
                        relief='flat',
                        padding=(20, 10))
         style.map("Blue.TButton",
-                 background=[('active', '#0051D5'), ('pressed', '#0051D5')],
-                 foreground=[('active', 'white'), ('pressed', 'white')])
+                 background=[('active', '#0051D5'), ('pressed', '#0051D5'), ('disabled', '#d0d0d0')],
+                 foreground=[('active', 'white'), ('pressed', 'white'), ('disabled', '#a0a0a0')])
         
         # Estilos para Treeview (tabla de resultados)
         # Estilo claro
@@ -511,7 +558,7 @@ class GuiConfig:
         self.logo_theme_frame.pack(fill='x')
         
         # Logo (centrado)
-        logo_path = os.path.join(os.path.dirname(__file__), 'logo.png')
+        logo_path = resource_path('logo.png')
         if os.path.exists(logo_path):
             try:
                 logo_image = Image.open(logo_path)
@@ -583,7 +630,7 @@ class GuiConfig:
         self.antenna_points = []
         
         # Cargar imágenes
-        antenna_path = os.path.join(os.path.dirname(__file__), 'antena.png')
+        antenna_path = resource_path('antena.png')
         try:
             img = Image.open(antenna_path).convert("RGBA")
             img_normal = img.resize((48, 48), Image.LANCZOS)
@@ -628,7 +675,7 @@ class GuiConfig:
         
         tk.Label(header_frame, text='Resultados del Proceso', font=self.bold_font, bg='#f0f0f0', fg='black').pack(side='left')
         self.copy_mac_btn = tk.Button(header_frame, text='Copiar MACs', command=self.copy_macs_to_clipboard, 
-                                      state='disabled', font=('Segoe UI', 10), bg='#007AFF', fg='white',
+                                      state='disabled', font=('Segoe UI', 10), bg='#808080', fg='white',
                                       relief='flat', cursor='hand2', padx=15, pady=5)
         self.copy_mac_btn.pack(side='right')
         
@@ -665,6 +712,11 @@ class GuiConfig:
         
         status = tk.Label(self.status_bar, textvariable=self.status_var, bg='#e0e0e0', font=('Segoe UI', 9), anchor='w', padx=10)
         status.pack(side='left')
+
+        # Botón de Test de Conexión (Ping Scan)
+        self.test_conn_btn = ttk.Button(self.status_bar, text='Test de Conexión', 
+                                       style='Blue.TButton', command=self.run_connectivity_test, cursor='hand2')
+        self.test_conn_btn.pack(side='right', padx=10, pady=2)
 
     def init_antenna_icons(self):
         self.progress['maximum'] = self.total_antennas
@@ -749,10 +801,32 @@ class GuiConfig:
         tk.Label(win, text='Rango inicio (octeto):').grid(row=2, column=0, sticky='e', padx=5, pady=5)
         start_var = tk.IntVar(value=self.settings.get('range_start', 11))
         tk.Entry(win, textvariable=start_var, width=10).grid(row=2, column=1, sticky='w', padx=5, pady=5)
+        
+        # Rango específico para Test
+        tk.Label(win, text='Rango Test (Ping):', fg='#28a745').grid(row=2, column=2, sticky='e', padx=5)
+        test_start_var = tk.IntVar(value=self.settings.get('range_start_test', 11))
+        test_end_var = tk.IntVar(value=self.settings.get('range_end_test', 18))
+        
+        tf = tk.Frame(win)
+        tf.grid(row=2, column=3, sticky='w')
+        tk.Entry(tf, textvariable=test_start_var, width=5).pack(side='left')
+        tk.Label(tf, text='-').pack(side='left')
+        tk.Entry(tf, textvariable=test_end_var, width=5).pack(side='left')
 
         tk.Label(win, text='Rango fin (octeto):').grid(row=3, column=0, sticky='e', padx=5, pady=5)
         end_var = tk.IntVar(value=self.settings.get('range_end', 18))
         tk.Entry(win, textvariable=end_var, width=10).grid(row=3, column=1, sticky='w', padx=5, pady=5)
+
+        # Rango específico para Update Only
+        tk.Label(win, text='Rango Act. (Update Only):', fg='#007AFF').grid(row=3, column=2, sticky='e', padx=5)
+        update_start_var = tk.IntVar(value=self.settings.get('range_start_update', 11))
+        update_end_var = tk.IntVar(value=self.settings.get('range_end_update', 18))
+        
+        uf = tk.Frame(win)
+        uf.grid(row=3, column=3, sticky='w')
+        tk.Entry(uf, textvariable=update_start_var, width=5).pack(side='left')
+        tk.Label(uf, text='-').pack(side='left')
+        tk.Entry(uf, textvariable=update_end_var, width=5).pack(side='left')
 
         modo_frame = tk.Frame(win)
         modo_frame.grid(row=4, column=0, columnspan=3, pady=8, sticky='w')
@@ -760,6 +834,7 @@ class GuiConfig:
         modo_var = tk.StringVar(value=self.settings.get('modo_flujo', 'full'))
         tk.Radiobutton(modo_frame, text='Configurar y actualizar', variable=modo_var, value='full').pack(side='left')
         tk.Radiobutton(modo_frame, text='Sólo configurar', variable=modo_var, value='config').pack(side='left')
+        tk.Radiobutton(modo_frame, text='Sólo actualizar', variable=modo_var, value='update_only').pack(side='left')
 
         def apply_and_close():
             self.settings['archivo_firmware'] = firmware_var.get()
@@ -768,11 +843,24 @@ class GuiConfig:
             try:
                 self.settings['range_start'] = int(start_var.get())
                 self.settings['range_end'] = int(end_var.get())
+                self.settings['range_start_update'] = int(update_start_var.get())
+                self.settings['range_end_update'] = int(update_end_var.get())
+                self.settings['range_start_test'] = int(test_start_var.get())
+                self.settings['range_end_test'] = int(test_end_var.get())
             except Exception:
                 messagebox.showwarning('Error', 'Rango inválido')
                 return
             self.save_settings()
-            self.total_antennas = max(1, self.settings['range_end'] - self.settings['range_start'] + 1)
+            
+            # Recalcular total_antennas según el modo seleccionado
+            if self.settings['modo_flujo'] == 'update_only':
+                start = self.settings['range_start_update']
+                end = self.settings['range_end_update']
+            else:
+                start = self.settings['range_start']
+                end = self.settings['range_end']
+                
+            self.total_antennas = max(1, end - start + 1)
             self.progress['maximum'] = self.total_antennas
             win.destroy()
             self.ajustes_window = None
@@ -837,6 +925,12 @@ class GuiConfig:
                     self.on_process_finished()
                 elif typ == 'error':
                     self.append_console(f'\nERROR: {data}\n')
+                elif typ == 'finished_test':
+                    self.status_var.set('Test de conexión finalizado.')
+                    self.running = False
+                    self.toggle_inputs(True)
+                    self.test_conn_btn.config(state='normal')
+                    self.start_btn.config(state='normal') # Asegurar que el botón de inicio vuelva a la normalidad
         except queue.Empty:
             pass
         self.root.after(100, self.flush_queue)
@@ -942,6 +1036,21 @@ class GuiConfig:
             except Exception as e:
                 print(f"Error parsing IPs: {e}")
 
+    def toggle_inputs(self, enable):
+        state = 'normal' if enable else 'disabled'
+        self.start_btn.config(state=state)
+        # Menú de archivo
+        try:
+            # Índice 0 es 'Archivo', dentro de ese 'Ajustes' es índice 0
+            # Esto es complejo en tkinter nativo si no guardamos referencia al item
+            pass
+        except:
+            pass
+        
+        # Botón de test
+        if hasattr(self, 'test_conn_btn'):
+            self.test_conn_btn.config(state=state)
+
     def start_process(self):
         # Save settings before starting
         self.save_settings()
@@ -954,57 +1063,78 @@ class GuiConfig:
         self.completed_antennas = 0
         self.active_idx = 0
         self.start_btn.config(text='Cancelar proceso')
+        
         self.running = True
         self.status_var.set('Ejecutando...')
-        # Disable menu items? (not necessary)
+        
+        # Deshabilitar botón de test durante la ejecución principal
+        if hasattr(self, 'test_conn_btn'):
+            self.test_conn_btn.config(state='disabled')
+            
         # Launch thread
         self.proc_thread = threading.Thread(target=self.run_subprocess, daemon=True)
         self.proc_thread.start()
 
 
     def run_subprocess(self):
-        env = os.environ.copy()
-        env['ARCHIVO_LOCAL_FW'] = self.settings.get('archivo_firmware', env.get('ARCHIVO_LOCAL_FW', ''))
-        env['BACKUP_CFG'] = self.settings.get('backup_cfg', env.get('BACKUP_CFG', ''))
-        env['MODO_FLUJO'] = self.settings.get('modo_flujo', 'full')
-        env['PYTHONUNBUFFERED'] = '1'
+        """Ejecuta la lógica del backend directamente en un hilo secundario."""
+        # Preparar variables de entorno (el backend las lee de os.environ)
+        os.environ['ARCHIVO_LOCAL_FW'] = self.settings.get('archivo_firmware', '')
+        os.environ['BACKUP_CFG'] = self.settings.get('backup_cfg', '')
+        os.environ['MODO_FLUJO'] = self.settings.get('modo_flujo', 'full')
+        
+        # Enviar rango correcto según el modo
+        if os.environ['MODO_FLUJO'] == 'update_only':
+            r_start = int(self.settings.get('range_start_update', 11))
+            r_end = int(self.settings.get('range_end_update', 18))
+        else:
+            r_start = int(self.settings.get('range_start', 11))
+            r_end = int(self.settings.get('range_end', 18))
+            
+        os.environ['RANGE_START'] = str(r_start)
+        os.environ['RANGE_END'] = str(r_end)
+        os.environ['PYTHONUNBUFFERED'] = '1'
 
-        cmd = [sys.executable, os.path.join(os.getcwd(), 'configuracion_completa_antenas2.py')]
+        self.root.after(0, self.init_antenna_icons)
+        self.active_idx = 0
+        macs_encontradas = []
+
         try:
-            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)
-            # Debug: confirmar que el proceso inició
-            self.queue.put(('line', f'[DEBUG] Proceso iniciado con PID: {self.proc.pid}\n'))
+            with redirect_stdout_to_queue(self.queue):
+                print(f"[DEBUG] Iniciando ejecución directa del módulo backend...")
+                # Llamar a la función principal del backend
+                # capturamos la salida línea por línea en el redirector
+                configuracion_completa_antenas2.run_all(
+                    range_start=r_start,
+                    range_end=r_end,
+                    backup_cfg=os.environ['BACKUP_CFG'],
+                    archivo_local_fw=os.environ['ARCHIVO_LOCAL_FW']
+                )
         except Exception as e:
-            self.queue.put(('error', f'No se pudo ejecutar el script: {e}'))
+            self.queue.put(('error', f'Error en la ejecución del backend: {e}'))
+            import traceback
+            print(traceback.format_exc())
             self.queue.put(('finished', None))
-            self.proc = None
             return
 
-        self.root.after(0, self.init_antenna_icons)  # Siempre resetea a gris al iniciar
-        self.active_idx = 0
-        total_detected = 0
-        working = False
-        macs_encontradas = []
-        
-        # Debug: confirmar que vamos a leer stdout
-        self.queue.put(('line', '[DEBUG] Iniciando lectura de stdout...\n'))
-        
-        for line in self.proc.stdout:
-            self.queue.put(('line', line))
-            lowered = line.lower()
-            # Guardar MAC
-            if 'mac:' in lowered:
-                import re
-                m = re.search(r'mac:\s*(\w{12,})', lowered)
-                if m:
-                    macs_encontradas.append(m.group(1))
-        rc = self.proc.wait()
+        # Intentar extraer MACs de la tabla de resultados (CSV) al finalizar
+        # Ya que ahora compartimos memoria, podríamos obtenerlas más directo, 
+        # pero para mantener compatibilidad leemos el CSV generado.
+        try:
+            csv_path = 'resultados_antenas.csv'
+            if os.path.exists(csv_path):
+                with open(csv_path, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        if row.get('mac') and row['mac'] != 'No disponible':
+                            macs_encontradas.append(row['mac'])
+        except Exception as e:
+            print(f"[DEBUG] Error leyendo MACs finales: {e}")
+
         self.root.after(0, self.show_mac_summary, macs_encontradas)
-        self.queue.put(('line', f'\n[Proceso terminado con código {rc}]\n'))
         self.root.after(0, self.progress.stop)
         self.root.after(0, lambda: self.progress.config(mode='determinate'))
         self.queue.put(('finished', None))
-        self.proc = None
 
     def _set_progress(self, value):
         self.completed_antennas = value
@@ -1043,7 +1173,8 @@ class GuiConfig:
 
     def on_process_finished(self):
         self.running = False
-        self.start_btn.config(text='Iniciar proceso')
+        self.start_btn.config(text='Iniciar proceso de configuración')
+        self.toggle_inputs(True)
         self.status_var.set('Terminado')
         # Try to show final CSV if present
         csv_path = os.path.join(os.getcwd(), 'resultados_antenas.csv')
@@ -1066,10 +1197,68 @@ class GuiConfig:
             # Naranja vibrante para visibilidad
             canvas.create_oval(2,4,14,16, fill='#FFA500', outline='#FF8C00')
             
+    def run_connectivity_test(self):
+        """Inicia el test de conectividad en un hilo separado."""
+        if self.running:
+            return
+            
+        # Deshabilitar controles
+        self.toggle_inputs(False)
+        self.test_conn_btn.config(state='disabled')
+        self.start_btn.config(state='disabled')
+        self.running = True # Usamos running para bloquear, aunque sea un proceso ligero
+        self.status_var.set('Ejecutando test de conexión...')
+        
+        # Iniciar worker
+        threading.Thread(target=self._connectivity_worker, daemon=True).start()
+
+    def _connectivity_worker(self):
+        try:
+            r_start = self.settings.get('range_start_test', 11)
+            r_end = self.settings.get('range_end_test', 18)
+            base_ip = '192.168.1.'
+            
+            self.queue.put(('line', '\n' + '='*40 + '\n'))
+            self.queue.put(('line', '🔍 INICIANDO TEST DE CONEXIÓN (PING SCAN)\n'))
+            self.queue.put(('line', '='*40 + '\n'))
+            
+            detected_ips = []
+            total_scanned = 0
+            
+            for i in range(r_start, r_end + 1):
+                ip = f"{base_ip}{i}"
+                total_scanned += 1
+                try:
+                    # Ping rápido (1 paquete, 1 segundo timeout)
+                    subprocess.check_output(["ping", "-c", "1", "-W", "1", ip], stderr=subprocess.STDOUT)
+                    self.queue.put(('line', f"✅ {ip}: ONLINE\n"))
+                    detected_ips.append(ip)
+                except subprocess.CalledProcessError:
+                    self.queue.put(('line', f"❌ {ip}: OFFLINE\n"))
+            
+            self.queue.put(('line', '\n' + '-'*40 + '\n'))
+            self.queue.put(('line', f"📊 RESUMEN DEL TEST:\n"))
+            self.queue.put(('line', f"   Antenas detectadas: {len(detected_ips)}/{total_scanned}\n"))
+            
+            if detected_ips:
+                self.queue.put(('line', f"   IPs Activas: {', '.join(detected_ips)}\n"))
+            else:
+                self.queue.put(('line', "   Ninguna antena respondió al ping.\n"))
+            
+            self.queue.put(('line', '-'*40 + '\n\n'))
+            
+        except Exception as e:
+            self.queue.put(('error', f"Error en test de conexión: {e}"))
+        finally:
+            # Restaurar estado en GUI (usando queue para thread safety si fuera necesario, 
+            # pero aquí finalizamos el bloque de 'running')
+            self.queue.put(('finished_test', None))
+
+            
 if __name__ == '__main__':
     root = tk.Tk()
     root.title('Configurador de antenas SIIP INTERNET')
-    w, h = 800, 700
+    w, h = 900, 800
     root.geometry(f'{w}x{h}')
     root.update_idletasks()
     ws = root.winfo_screenwidth()
@@ -1078,7 +1267,7 @@ if __name__ == '__main__':
     y = (hs // 2) - (h // 2)
     root.geometry(f'{w}x{h}+{x}+{y}')
     try:
-        icon_path = os.path.join(os.path.dirname(__file__), 'icono.png')
+        icon_path = resource_path('icono.png')
         icon_img = Image.open(icon_path)
         icon_tk = ImageTk.PhotoImage(icon_img)
         root.iconphoto(True, icon_tk)

@@ -2,6 +2,22 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [1.1.0] - 2025-12-12
+### 🌟 Nuevas Funcionalidades
+- **Test de Conexión**: Nuevo botón en la barra de estado que permite realizar una prueba de conectividad (ping scan) rápida e independiente sin iniciar el proceso de configuración completo. Muestra IPs detectadas y estado en la consola.
+- **Modo "Sólo Actualizar"**: Nueva lógica operativa para reintentar únicamente la actualización de firmware en antenas que ya tienen configuración final, optimizando tiempos de reparación.
+- **Gestión de Rangos Independientes**: Ahora es posible configurar rangos de IP distintos para cada operación (Configuración Standard, Test de Conexión y Sólo Actualizar) desde el menú de Ajustes.
+- **Filtrado Inteligente de MACs**: El botón "Copiar MACs" ahora utiliza expresiones regulares para limpiar la salida, ignorando textos de error ("No disponible") y copiando únicamente direcciones MAC válidas.
+
+### 🛠 Mejoras y Correcciones
+- **Estabilidad Visual**: Solucionado el parpadeo errático de la barra de progreso al forzar modo 'determinate'.
+- **Indicador de Estado Activo**: Implementado (finalmente) el indicador naranja para señalar visualmente qué antena se está procesando en tiempo real.
+- **Layout y UX**: 
+    - Aumentado tamaño de ventana inicial a 900x800 para asegurar visibilidad total de controles inferiores.
+    - Estilo visual explícito para botones deshabilitados (gris).
+    - Estilo permanente (Gris/Blanco) para el botón "Copiar MACs" según preferencia de usuario.
+- **Correcciones Logicas**: Ajustes en el backend para soportar un modo de operación (update_only) que no desplaza la IP objetivo.
+
 ## [1.0.0] - 2025-12-10
 ### 🎉 Versión Inicial Estable
 

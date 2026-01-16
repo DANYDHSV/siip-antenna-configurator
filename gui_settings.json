@@ -1,8 +1,12 @@
 {
-  "archivo_firmware": "WA.v8.7.19.48279.250811.0636.bin",
+  "archivo_firmware": "WA.v8.7.21.48401.251212.0937.bin",
   "backup_cfg": "WA-28704EB63776.cfg",
   "range_start": 11,
   "range_end": 18,
   "modo_flujo": "full",
-  "dark_mode": true
+  "dark_mode": true,
+  "range_start_update": 1,
+  "range_end_update": 8,
+  "range_start_test": 1,
+  "range_end_test": 18
 }

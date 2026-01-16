@@ -1,6 +1,6 @@
 # Configurador de Antenas SIIP INTERNET
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.8+-green.svg)
 ![Status](https://img.shields.io/badge/status-stable-success.svg)
 
@@ -33,6 +33,15 @@ Pestaña dedicada para visualizar el estado final de cada operación, con tabla 
 - **Modos de Operación**:
   - **Full**: Configuración completa + Actualización de Firmware.
   - **Config**: Solo aplicación de configuración base.
+  - **Update Only**: Solo actualización de firmware (ideal para antenas ya configuradas).
+- **Flexibilidad**:
+  - Configuración de rangos de IP independientes para cada tipo de tarea.
+
+## 🛠️ Herramientas de Diagnóstico
+
+La aplicación incluye herramientas integradas para facilitar el trabajo de campo:
+- **Test de Conexión (Ping Scan)**: Botón dedicado para realizar comprobaciones rápidas de visibilidad de antenas en la red sin ejecutar scripts pesados.
+- **Validación de MACs**: Copiado inteligente de direcciones MAC al portapapeles, filtrando errores y texto basura.
 
 ## 🚀 Instalación y Requisitos
 
