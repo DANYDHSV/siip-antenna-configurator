@@ -113,8 +113,10 @@ def esperar_ping(ip, intentos=60, espera=1, verbose=False):
     """
     if verbose:
         print(f"[Verificación] Esperando a que responda {ip}...")
+    import sys
+    timeout_val = "1000" if sys.platform == 'darwin' else "1"
     for _ in range(intentos):
-        if subprocess.run(["ping", "-c", "1", "-W", "1", ip],
+        if subprocess.run(["ping", "-c", "1", "-W", timeout_val, ip],
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
             if verbose:
                 print(f"✅ {ip} responde a ping")
@@ -365,9 +367,31 @@ def configurar_inicial(ip):
 
         save_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".loginform-submit")))
         save_btn.click()
-        print("✅ Botón Guardar presionado. Configuración inicial completada!")
+        print("✅ Botón Guardar presionado.")
         
-        time.sleep(2)  # Pausa breve por si hay procesos internos
+        # Verificar bypass para firmwares v8.7.19+ (Mínimo 12 caracteres)
+        try:
+            time.sleep(1.5)
+            pwd_input = driver.find_element(By.ID, "loginform-new-password")
+            if pwd_input.is_displayed():
+                print("⚠️ Detectada validación de firmware v19+ (mínimo 12 caracteres). Inyectando contraseña temporal larga...")
+                pwd_input.clear()
+                pwd_input.send_keys("Siip.123456789")
+                pwd2 = driver.find_element(By.ID, "loginform-new-password2")
+                pwd2.clear()
+                pwd2.send_keys("Siip.123456789")
+                
+                save_btn = driver.find_element(By.CSS_SELECTOR, ".loginform-submit")
+                save_btn.click()
+                print("✅ Botón Guardar presionado con contraseña extendida (Siip.123456789).")
+                time.sleep(2)
+                return "Siip.123456789"
+        except Exception:
+            pass
+
+        print("✅ Configuración inicial completada!")
+        time.sleep(8)  # Pausa Larga (8s): La antena reinicia servicios web y ssh al aplicarse una nueva contraseña.
+        return PASSWORD
 
     finally:
         driver.quit()
@@ -375,10 +399,12 @@ def configurar_inicial(ip):
 # -------------------
 # FUNCIONES SSH para CONFIGURACIÓN
 # -------------------
-def conectar(ip):
+def conectar(ip, usuario=USUARIO, passwd=None):
+    if passwd is None:
+        passwd = PASSWORD
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    ssh.connect(ip, username=USUARIO, password=PASSWORD,
+    ssh.connect(ip, username=usuario, password=passwd,
                 look_for_keys=False, allow_agent=False,
                 timeout=10,
                 disabled_algorithms={"pubkeys": ["rsa-sha2-256","rsa-sha2-512"]})
@@ -388,13 +414,25 @@ def subir_cfg(ssh, archivo_local):
     with open(archivo_local, "r") as f:
         contenido = f.read()
     cmd = f"cat > /tmp/system.cfg <<'EOF'\n{contenido}\nEOF"
-    ssh.exec_command(cmd)
+    stdin, stdout, stderr = ssh.exec_command(cmd)
+    stdout.channel.recv_exit_status()  # Bloquear hasta terminar
 
 def aplicar_cfg_y_reiniciar(ssh):
-    ssh.exec_command("cfgmtd -w -p /etc")
-    time.sleep(2)
+    print("   [SSH] Escribiendo configuración en memoria flash (cfgmtd)...")
+    stdin, stdout, stderr = ssh.exec_command("cfgmtd -w -p /etc")
+    # Esperar a que termine de escribir antes de reiniciar
+    status = stdout.channel.recv_exit_status()
+    if status != 0:
+        print(f"⚠️ cfgmtd reportó estado {status}")
+        
+    print("   [SSH] Reiniciando la antena...")
     ssh.exec_command("reboot")
-    ssh.close()
+    # No esperamos recv_exit_status aquí porque la red se cae intencionalmente
+    time.sleep(2)
+    try:
+        ssh.close()
+    except:
+        pass
 
 # -------------------
 # FUNCIÓN DE ACTUALIZACIÓN DE FIRMWARE MEJORADA
@@ -656,9 +694,12 @@ def run_all(range_start=11, range_end=18, backup_cfg=None, archivo_local_fw=None
         Escanea IPs en el rango y regresa una lista de las que responden a ping.
         """
         encontrados = []
+        import sys
         for octeto in range(inicio, fin + 1):
             ip = f"{base_ip}{octeto}"
-            if subprocess.run(["ping", "-c", "1", "-W", str(ping_timeout), ip], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+            # En macOS -W es en milisegundos, en Linux en segundos
+            timeout_val = "1000" if sys.platform == 'darwin' else "1"
+            if subprocess.run(["ping", "-c", "1", "-W", timeout_val, ip], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
                 print(f"[SCAN] IP activa encontrada: {ip}")
                 encontrados.append(ip)
             else:
@@ -730,16 +771,17 @@ def run_all(range_start=11, range_end=18, backup_cfg=None, archivo_local_fw=None
 
             # FASE 1 Solo si NO es update_only
             if modo_flujo != 'update_only':
+                passw_fase1 = PASSWORD
                 if modo_flujo == 'full':
                     print("\n2. Realizando configuración web inicial...")
                     print("[GUI] PHASE_PROGRESS: web_config, 0")
-                    configurar_inicial(IP_INICIAL)
+                    passw_fase1 = configurar_inicial(IP_INICIAL)
                     print("[GUI] PHASE_PROGRESS: web_config, 100")
 
                 print("\n3. Aplicando configuración por SSH...")
                 print("[GUI] PHASE_PROGRESS: ssh_config, 0")
                 esperar_ssh(IP_INICIAL)
-                ssh = conectar(IP_INICIAL)
+                ssh = conectar(IP_INICIAL, passwd=passw_fase1)
                 print("[GUI] PHASE_PROGRESS: ssh_config, 30")
                 cfg_temporal = modificar_cfg_para_ip(BACKUP_CFG, IP_FINAL)
                 subir_cfg(ssh, cfg_temporal)

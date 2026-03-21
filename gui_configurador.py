@@ -112,6 +112,9 @@ from tkinter import ttk, messagebox, filedialog
 from tkinter.scrolledtext import ScrolledText
 from PIL import Image, ImageTk, ImageDraw, ImageChops
 
+import urllib.request
+import ssl
+
 # Para redireccionar salida de hilos
 import io
 from contextlib import contextmanager
@@ -304,6 +307,120 @@ class GuiConfig:
         # Apply initial theme
         self.apply_theme()
 
+        # Check for firmware updates in background
+        threading.Thread(target=self.check_firmware_updates, daemon=True).start()
+
+    def check_firmware_updates(self):
+        """Revisa la API de Ubiquiti en segundo plano para ver si hay una nueva versión."""
+        try:
+            url = "https://fw-update.ubnt.com/api/firmware?filter=eq~~product~~WA&filter=eq~~channel~~release&sort=-version&limit=1"
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, context=ctx, timeout=10) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                
+            if '_embedded' in data and 'firmware' in data['_embedded'] and len(data['_embedded']['firmware']) > 0:
+                latest_fw = data['_embedded']['firmware'][0]
+                latest_version_str = latest_fw.get('version', '') # P.ej. 'v8.7.22'
+                download_url = latest_fw.get('_links', {}).get('data', {}).get('href', '')
+                
+                # Extraer partes de versión online
+                m_online = re.search(r'v(\d+)\.(\d+)\.(\d+)', latest_version_str)
+                if not m_online or not download_url:
+                    return
+                version_online = tuple(map(int, m_online.groups()))
+                
+                # Extraer versión actual seleccionada
+                current_fw_file = self.settings.get('archivo_firmware', '')
+                m_current = re.search(r'v(\d+)\.(\d+)\.(\d+)', current_fw_file)
+                if m_current:
+                    version_current = tuple(map(int, m_current.groups()))
+                    
+                    if version_online > version_current:
+                        # Hay nueva versión!
+                        # Intentamos extraer el nombre original (tags.fullVersion) si existe,
+                        # si no, armamos un nombre estándar para que coincida con el regex del backend
+                        full_version = latest_fw.get('tags', {}).get('fullVersion', f"WA.{latest_version_str}.bin")
+                        if not full_version.endswith('.bin'):
+                            full_version += '.bin'
+                            
+                        self.root.after(0, self.prompt_firmware_update, latest_version_str, download_url, full_version)
+                else:
+                    # Si no hay versión parseable definida, asumimos que puede querer actualizar
+                    full_version = latest_fw.get('tags', {}).get('fullVersion', f"WA.{latest_version_str}.bin")
+                    if not full_version.endswith('.bin'):
+                        full_version += '.bin'
+                    self.root.after(0, self.prompt_firmware_update, latest_version_str, download_url, full_version)
+        except Exception as e:
+            print(f"[AUTO-UPDATE] Error verificando firmware: {e}")
+
+    def prompt_firmware_update(self, version_str, download_url, target_filename):
+        msg = f"Hay una nueva versión de firmware disponible: {version_str}\n¿Deseas descargarla y configurarla ahora?"
+        if messagebox.askyesno("Nueva Versión Disponible", msg, parent=self.root):
+            self.download_firmware(download_url, target_filename)
+
+    def download_firmware(self, url, filename):
+        dl_window = tk.Toplevel(self.root)
+        dl_window.title("Descargando Firmware")
+        dl_window.geometry("400x120")
+        dl_window.transient(self.root)
+        dl_window.grab_set()
+        
+        # Centrar
+        dl_window.geometry(f"+{self.root.winfo_rootx() + 200}+{self.root.winfo_rooty() + 250}")
+        
+        lbl = ttk.Label(dl_window, text=f"Descargando {filename}...")
+        lbl.pack(pady=10)
+        
+        progress = ttk.Progressbar(dl_window, orient='horizontal', mode='determinate', length=350)
+        progress.pack(pady=10)
+        
+        status_lbl = ttk.Label(dl_window, text="Iniciando...")
+        status_lbl.pack()
+        
+        def reporthook(count, block_size, total_size):
+            if total_size > 0:
+                percent = int(count * block_size * 100 / total_size)
+                # Actualizar barra desde el hilo secundario (root.after es mejor, pero tkinter maneja enteros bien)
+                self.root.after(0, progress.config, {'value': min(percent, 100)})
+                self.root.after(0, status_lbl.config, {'text': f"{min(percent, 100)}%"})
+        
+        def _download_worker():
+            try:
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                
+                # Para evitar error 403 Forbidden, simulamos ser un navegador
+                # IMPORTANTE: NO usar install_opener para no contaminar el backend que corre en el mismo proceso
+                opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+                opener.addheaders = [('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)')]
+                
+                # Para urlretrieve con un opener personalizado, hay una forma:
+                try:
+                    urllib.request.install_opener(opener)
+                    urllib.request.urlretrieve(url, filename, reporthook=reporthook)
+                finally:
+                    # Restaurar el opener por defecto inmediatamente para no afectar a esperar_web del backend
+                    urllib.request.install_opener(urllib.request.build_opener())
+
+                
+                self.root.after(0, dl_window.destroy)
+                
+                # Actualizar configuración
+                self.settings['archivo_firmware'] = filename
+                self.save_settings()
+                
+                self.root.after(0, lambda: messagebox.showinfo("Descarga Completada", f"Firmware actualizado a {filename}. Por favor reinicia o revisa los ajustes.", parent=self.root))
+            except Exception as e:
+                self.root.after(0, dl_window.destroy)
+                self.root.after(0, lambda txt=str(e): messagebox.showerror("Error", f"Fallo al descargar: {txt}", parent=self.root))
+                
+        threading.Thread(target=_download_worker, daemon=True).start()
+
     def load_settings(self):
         if os.path.exists(SETTINGS_FILE):
             try:
@@ -396,6 +513,16 @@ class GuiConfig:
         if hasattr(self, 'theme_btn'):
             icon = '🌙' if not self.dark_mode else '☀️'
             self.theme_btn.configure(text=icon, bg=theme['button_bg'], fg=theme['button_fg'])
+
+        # Actualizar botón de ajustes
+        if hasattr(self, 'settings_btn'):
+            # ttk.Button no usa bg/fg directamente, sino estilos.
+            # Si se usa un estilo, se actualiza el estilo.
+            # Para este botón específico, se mantiene el estilo "Blue.TButton"
+            # y se asume que el estilo ya maneja los colores.
+            # Si se necesita cambiar el color dinámicamente, se debería reconfigurar el estilo.
+            # Por ahora, no se hace nada aquí ya que el estilo "Blue.TButton" es fijo.
+            pass
         
         # Actualizar icons_container
         if hasattr(self, 'icons_container'):
@@ -448,8 +575,8 @@ class GuiConfig:
             if hasattr(self, 'log_tools_frame'):
                 self.log_tools_frame.configure(bg=theme['frame_bg'])
             if hasattr(self, 'copy_log_btn'):
-                # Usar estilo de botón secundario o el mismo azul
-                self.copy_log_btn.configure(bg=theme['button_bg'], fg=theme['button_fg'])
+                # Usar estilo nativo (ttk.Button en macOS maneja mejor el contraste sin bg/fg directo)
+                pass
 
         if hasattr(self, 'tab_resultados'):
             self.tab_resultados.configure(bg=theme['bg'])
@@ -463,8 +590,7 @@ class GuiConfig:
                         elif isinstance(subchild, tk.Label):
                             subchild.configure(bg=theme['bg'], fg=theme['fg'])
                         elif isinstance(subchild, tk.Button):
-                            # Botón de copiar MACs - Estilo fijo solicitado: Gris con letras blancas
-                            subchild.configure(bg='#808080', fg='white')
+                            pass # Eran para los botones antiguos tk.Button, ahora usamos ttk.Button
         
         # Actualizar estilo del Treeview (tabla de resultados)
         if hasattr(self, 'results_tree'):
@@ -586,6 +712,15 @@ class GuiConfig:
                                    highlightbackground='#007AFF', highlightcolor='#007AFF')
         self.theme_btn.place(relx=1.0, rely=0.0, anchor='ne')
 
+        # Botón de ajustes (al lado del botón de tema)
+        self.settings_btn = tk.Button(self.logo_theme_frame, text='⚙️', font=('Segoe UI', 16), 
+                                   command=self.open_settings, width=3, height=1,
+                                   bg='#007AFF', fg='white', cursor='hand2',
+                                   relief='flat', borderwidth=0,
+                                   activebackground='#0051D5', activeforeground='white',
+                                   highlightbackground='#007AFF', highlightcolor='#007AFF')
+        self.settings_btn.place(relx=1.0, rely=0.0, x=-50, anchor='ne')
+
         # Título
         title = tk.Label(self.header_frame, text='CONFIGURADOR DE ANTENAS UBIQUITI SIIP INTERNET', 
                         font=self.header_font, bg='#f0f0f0', fg='#333333')
@@ -651,10 +786,7 @@ class GuiConfig:
         # Toolbar para el log
         self.log_tools_frame = tk.Frame(self.log_frame, bg='#f0f0f0')
         self.log_tools_frame.pack(fill='x', pady=(0, 5))
-        
-        self.copy_log_btn = tk.Button(self.log_tools_frame, text='Copiar Log', command=self.copy_console_log,
-                                     font=('Segoe UI', 9), bg='#007AFF', fg='white',
-                                     relief='flat', cursor='hand2', padx=10, pady=2)
+        self.copy_log_btn = ttk.Button(self.log_tools_frame, text='Copiar Log', command=self.copy_console_log)
         self.copy_log_btn.pack(side='right')
 
         self.console = ScrolledText(self.log_frame, height=10, wrap='word', font=('Consolas', 9), bg='#fafafa', fg='black')
@@ -674,9 +806,7 @@ class GuiConfig:
         header_frame.pack(fill='x', pady=(0, 10))
         
         tk.Label(header_frame, text='Resultados del Proceso', font=self.bold_font, bg='#f0f0f0', fg='black').pack(side='left')
-        self.copy_mac_btn = tk.Button(header_frame, text='Copiar MACs', command=self.copy_macs_to_clipboard, 
-                                      state='disabled', font=('Segoe UI', 10), bg='#808080', fg='white',
-                                      relief='flat', cursor='hand2', padx=15, pady=5)
+        self.copy_mac_btn = ttk.Button(header_frame, text='Copiar MACs', command=self.copy_macs_to_clipboard, state='disabled')
         self.copy_mac_btn.pack(side='right')
         
         # Tabla de resultados con Treeview
@@ -1113,6 +1243,8 @@ class GuiConfig:
         except Exception as e:
             self.queue.put(('error', f'Error en la ejecución del backend: {e}'))
             import traceback
+            with open('crash_log.txt', 'w') as f:
+                f.write(traceback.format_exc())
             print(traceback.format_exc())
             self.queue.put(('finished', None))
             return
