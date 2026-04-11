@@ -2,6 +2,18 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [1.2.0] - 2026-03-21
+### 🌟 Nuevas Funcionalidades
+- **Actualizador de Firmware Automático (OTA)**: La aplicación verifica transparentemente contra la API de Ubiquiti (`fw-update.ubnt.com`) si existe un parche más nuevo para la base estática `WA`. De existir, ofrece descargarla, mostrándote una ventana de progreso y actualizando las configuraciones centrales automáticamente.
+- **Bypass de Políticas de Seguridad v19+**: Las antenas con firmware de fábrica en revisiones v19 y superior exigen obligatoriamente 12 caracteres. El configurador intercepta la validación e inyecta temporalmente `Siip.123456789` para abrir puertas SSH durante la Fase 1 sin sacrificar la restauración del backup, previniendo cuellos de botella de downgrade.
+- **Botón Rápido de Ajustes**: Se incluye un icono de Engrane (`⚙️`) directamente en el header de la aplicación para saltar rápidamente a la manipulación de IPs y recursos locales, complementando al botón Dark/Light mode.
+
+### 🛠 Mejoras y Correcciones (Bug Fixes)
+- **Corrección de Tiempos en Pings para macOS**: El binario `ping` nativo en macOS utiliza milisegundos (`-W`) contrastando con Linux (segundos), lo que producía falsos positivos por timeout (1ms). Ahora inyecta `1000` en sistemas Darwin, resucitando la Detección de Dispositivos.
+- **Sincronización Crítica en Memoria Flash (SSH)**: Se ajustó el motor paramiko para ser bloqueante (`stdout.channel.recv_exit_status()`). Antes, el comando `reboot` atropellaba a la escritura en búfer `cfgmtd` por la naturaleza asíncrona de ssh, provocando pérdida esporádica de la IP inyectada.
+- **Retraso Post-Selenium**: Al aplicar una nueva credencial vía Web, la antena resetea el proceso interno `sshd` matando momentáneamente sus puertos. Se implementó una pausa extendida de 8s para asegurar que SSH esté levantado previniendo `Channel closed`.
+- **Rendimiento Nativo de la Intefaz Gráfica (macOS Text Invisibility)**: Sustitución de `tk.Button` retrogradados por componentes `ttk.Button` para los utilitarios "Copiar Log" y "Copiar MACs". Ahora el Sistema Operativo dibuja nativamente los gradientes, bordes, y corrige drásticamente colores invisibles (blanco sobre blanco) originados a perder foco o alternar en modo Light.
+
 ## [1.1.0] - 2025-12-12
 ### 🌟 Nuevas Funcionalidades
 - **Test de Conexión**: Nuevo botón en la barra de estado que permite realizar una prueba de conectividad (ping scan) rápida e independiente sin iniciar el proceso de configuración completo. Muestra IPs detectadas y estado en la consola.
