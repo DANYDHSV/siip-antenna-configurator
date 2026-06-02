@@ -105,6 +105,7 @@ ensure_gui_dependencies()
 import csv
 import re
 import socket
+import webbrowser
 
 # Para la GUI
 import tkinter as tk
@@ -192,9 +193,13 @@ class GuiConfig:
         # Limpiar tabla existente
         for item in self.results_tree.get_children():
             self.results_tree.delete(item)
+            
+        self.successful_ips = []
         
         if not os.path.exists(csv_path):
             self.copy_mac_btn.config(state='disabled')
+            if hasattr(self, 'open_ips_btn'):
+                self.open_ips_btn.pack_forget()
             return
         
         try:
@@ -204,21 +209,33 @@ class GuiConfig:
                 for row in reader:
                     count += 1
                     exito_val = str(row.get('exito', '')).lower()
-                    estado = "✅ OK" if exito_val in ['1', 'true', 'yes'] else "❌ ERROR"
+                    exito_bool = exito_val in ['1', 'true', 'yes']
+                    estado = "✅ OK" if exito_bool else "❌ ERROR"
                     self.results_tree.insert('', 'end', values=(
                         row.get('ip_inicial', '-'),
                         row.get('ip_final', '-'),
                         row.get('mac', 'No disponible'),
                         estado
                     ))
+                    if exito_bool:
+                        ip_final = row.get('ip_final')
+                        if ip_final and ip_final != '-':
+                            self.successful_ips.append(ip_final)
                 
                 if count > 0:
                     self.copy_mac_btn.config(state='normal')
                 else:
                     self.copy_mac_btn.config(state='disabled')
+                    
+                if self.successful_ips and hasattr(self, 'open_ips_btn'):
+                    self.open_ips_btn.pack(side='right', padx=5)
+                elif hasattr(self, 'open_ips_btn'):
+                    self.open_ips_btn.pack_forget()
         except Exception as e:
             print(f"Error al cargar resultados: {e}")
             self.copy_mac_btn.config(state='disabled')
+            if hasattr(self, 'open_ips_btn'):
+                self.open_ips_btn.pack_forget()
     def copy_macs_to_clipboard(self):
         """Copia todas las MACs de la tabla al portapapeles"""
         import re
@@ -244,6 +261,19 @@ class GuiConfig:
             self.status_var.set(f'Copiadas {len(macs)} MACs al portapapeles')
         else:
             self.status_var.set('No hay MACs válidas para copiar')
+
+    def open_successful_ips(self):
+        """Abre todas las IPs exitosas en pestañas del navegador predeterminado"""
+        if not hasattr(self, 'successful_ips') or not self.successful_ips:
+            return
+            
+        try:
+            for ip in self.successful_ips:
+                url = f"https://{ip}"
+                webbrowser.open_new_tab(url)
+            self.status_var.set(f"Abiertas {len(self.successful_ips)} IPs en el navegador")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir el navegador: {e}", parent=self.root)
 
     def copy_console_log(self):
         """Copia el contenido de la consola al portapapeles"""
@@ -293,6 +323,7 @@ class GuiConfig:
         self.proc_thread = None
         self.running = False
         self.queue = queue.Queue()
+        self.successful_ips = []
         self.total_antennas = max(1, int(self.settings.get('range_end', 18)) - int(self.settings.get('range_start', 11)) + 1)
         self.completed_antennas = 0
         
@@ -808,6 +839,7 @@ class GuiConfig:
         tk.Label(header_frame, text='Resultados del Proceso', font=self.bold_font, bg='#f0f0f0', fg='black').pack(side='left')
         self.copy_mac_btn = ttk.Button(header_frame, text='Copiar MACs', command=self.copy_macs_to_clipboard, state='disabled')
         self.copy_mac_btn.pack(side='right')
+        self.open_ips_btn = ttk.Button(header_frame, text='Abrir IPs Exitosas 🌐', command=self.open_successful_ips)
         
         # Tabla de resultados con Treeview
         table_frame = tk.Frame(results_container, bg='#f0f0f0')
@@ -1186,6 +1218,9 @@ class GuiConfig:
         self.save_settings()
         self.cancel_requested = False
         configuracion_completa_antenas2.cancel_requested = False
+        self.successful_ips = []
+        if hasattr(self, 'open_ips_btn'):
+            self.open_ips_btn.pack_forget()
         self.console.configure(state='normal')
         self.console.delete('1.0', 'end')
         self.console.configure(state='disabled')
