@@ -2,6 +2,15 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [1.3.0] - 2026-06-02
+### 🌟 Nuevas Funcionalidades
+- **Cancelación Cooperativa**: Se implementó una arquitectura de detención cooperativa entre la interfaz gráfica (`gui_configurador.py`) y el backend (`configuracion_completa_antenas2.py`) usando una bandera de estado compartida (`cancel_requested`) y una excepción dedicada (`ProcesoCancelado`) basada en `KeyboardInterrupt`. Ahora el botón "Cancelar proceso" interrumpe de inmediato cualquier hilo de ejecución activo de manera limpia y responsiva.
+- **Chequeos de Conectividad Verbosos**: Se habilitó el reporte de estado detallado (`verbose=True`) para todos los procesos de espera en red (`esperar_ping`, `esperar_web`, `esperar_ssh`). El usuario puede visualizar en la consola el avance de intentos en tiempo real en lugar de una pantalla estática.
+
+### 🛠 Mejoras y Correcciones (Bug Fixes)
+- **Corrección de Bloqueos en IPs Ajenas**: Se optimizó la validación inicial de conectividad de los dispositivos escaneados reduciendo dramáticamente el número de reintentos máximos (de 120/60 a 15/10 intentos). Esto permite que el backend descarte en menos de 20 segundos cualquier dirección IP del rango que responda a ping pero no pertenezca a una antena Ubiquiti activa (ej. otros dispositivos en la red local), evitando que la consola se congele en silencio durante minutos.
+- **Protección contra Pérdida de Excepciones**: Se modificaron bloques genéricos `except:` para propagar correctamente las interrupciones de usuario (`KeyboardInterrupt`), garantizando que la señal de cancelación llegue sin trabas al final del ciclo de vida del hilo.
+
 ## [1.2.0] - 2026-03-21
 ### 🌟 Nuevas Funcionalidades
 - **Actualizador de Firmware Automático (OTA)**: La aplicación verifica transparentemente contra la API de Ubiquiti (`fw-update.ubnt.com`) si existe un parche más nuevo para la base estática `WA`. De existir, ofrece descargarla, mostrándote una ventana de progreso y actualizando las configuraciones centrales automáticamente.

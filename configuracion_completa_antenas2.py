@@ -9,6 +9,31 @@ import csv
 import shutil
 
 # -------------------
+# SISTEMA DE CANCELACIÓN COOPERATIVA
+# -------------------
+cancel_requested = False
+
+class ProcesoCancelado(KeyboardInterrupt):
+    """Excepción lanzada cuando el usuario cancela el proceso."""
+    pass
+
+def check_cancel():
+    if cancel_requested:
+        raise ProcesoCancelado("Proceso cancelado por el usuario")
+
+def sleep_interruptible(seconds):
+    """Duerme en intervalos cortos para revisar si se ha solicitado la cancelación."""
+    step = 0.2
+    elapsed = 0.0
+    while elapsed < seconds:
+        check_cancel()
+        remaining = seconds - elapsed
+        to_sleep = min(step, remaining)
+        time.sleep(to_sleep)
+        elapsed += to_sleep
+    check_cancel()
+
+# -------------------
 # DEPENDENCY CHECK / AUTO-INSTALL
 # -------------------
 def ensure_python_packages(packages):
@@ -96,6 +121,7 @@ IP_INICIAL = "192.168.1.20"  # valor por defecto (se sobrescribe en tiempo de ej
 IP_FINAL = "192.168.1.1"     # valor por defecto (se sobrescribe en tiempo de ejecución)
 USUARIO = "ubnt"
 PASSWORD = "Siip.567"
+PASSWORD_LARGA = "Siip.123456789"  # contraseña para antenas con firmware v19+ que requieren 12+ caracteres
 # Allow overrides from environment so GUIs or other runners can change files dynamically
 BACKUP_CFG = os.environ.get('BACKUP_CFG', "WA-28704EB63776.cfg")
 ARCHIVO_LOCAL_FW = os.environ.get('ARCHIVO_LOCAL_FW', 'WA.v8.7.19.48279.250811.0636.bin')
@@ -111,17 +137,19 @@ def esperar_ping(ip, intentos=60, espera=1, verbose=False):
     """
     Espera a que un host responda a ping.
     """
+    check_cancel()
     if verbose:
         print(f"[Verificación] Esperando a que responda {ip}...")
     import sys
     timeout_val = "1000" if sys.platform == 'darwin' else "1"
     for _ in range(intentos):
+        check_cancel()
         if subprocess.run(["ping", "-c", "1", "-W", timeout_val, ip],
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
             if verbose:
                 print(f"✅ {ip} responde a ping")
             return True
-        time.sleep(espera)
+        sleep_interruptible(espera)
     raise TimeoutError(f"❌ {ip} no respondió a ping en el tiempo esperado")
 
 def esperar_web(ip, puerto=443, timeout=2, reintentos=120, verbose=False):
@@ -129,9 +157,11 @@ def esperar_web(ip, puerto=443, timeout=2, reintentos=120, verbose=False):
     Espera a que un puerto web esté disponible.
     Aumentado el timeout y reintentos para la actualización de firmware.
     """
+    check_cancel()
     if verbose:
         print(f"[Verificación] Esperando a que {ip}:{puerto} abra el servicio web...")
     for intento in range(reintentos):
+        check_cancel()
         try:
             with socket.create_connection((ip, puerto), timeout=timeout):
                 if verbose:
@@ -140,16 +170,18 @@ def esperar_web(ip, puerto=443, timeout=2, reintentos=120, verbose=False):
         except (socket.timeout, ConnectionRefusedError, OSError):
             if verbose and intento % 20 == 0 and intento > 0:  # Mensaje cada 20 segundos
                 print(f"[{intento}/{reintentos}] Esperando interfaz web en {ip}...")
-            time.sleep(1)
+            sleep_interruptible(1)
     raise TimeoutError(f"❌ El puerto {puerto} en {ip} no se abrió a tiempo")
 
 def esperar_ssh(ip, puerto=22, timeout=2, reintentos=60, verbose=False):
     """
     Espera a que un puerto SSH esté disponible.
     """
+    check_cancel()
     if verbose:
         print(f"[Verificación] Esperando a que {ip}:{puerto} permita conexión SSH...")
     for intento in range(reintentos):
+        check_cancel()
         try:
             with socket.create_connection((ip, puerto), timeout=timeout):
                 if verbose:
@@ -158,13 +190,14 @@ def esperar_ssh(ip, puerto=22, timeout=2, reintentos=60, verbose=False):
         except (socket.timeout, ConnectionRefusedError, OSError):
             if verbose and intento % 10 == 0 and intento > 0:  # Mensaje cada 10 segundos
                 print(f"[{intento}/{reintentos}] Esperando SSH en {ip}...")
-            time.sleep(1)
+            sleep_interruptible(1)
     raise TimeoutError(f"❌ SSH en {ip} no se abrió a tiempo")
 
 def verificar_interfaz_web_lista(ip, max_intentos=10, espera_entre_intentos=5):
     """
     Verifica que la interfaz web esté completamente cargada y funcional.
     """
+    check_cancel()
     print(f"[Verificación Web] Verificando que la interfaz web esté completamente lista en {ip}...")
     
     chrome_options = Options()
@@ -177,13 +210,14 @@ def verificar_interfaz_web_lista(ip, max_intentos=10, espera_entre_intentos=5):
     service = Service(ChromeDriverManager().install())
     
     for intento in range(max_intentos):
+        check_cancel()
         driver = None
         try:
             driver = webdriver.Chrome(service=service, options=chrome_options)
             driver.set_page_load_timeout(10)
             
             driver.get(f"https://{ip}")
-            time.sleep(2)  # Espera a que la página cargue
+            sleep_interruptible(2)  # Espera a que la página cargue
             
             # Verifica que hay elementos de la interfaz de login
             WebDriverWait(driver, 5).until(
@@ -196,7 +230,7 @@ def verificar_interfaz_web_lista(ip, max_intentos=10, espera_entre_intentos=5):
             
         except Exception as e:
             print(f"[{intento+1}/{max_intentos}] Interfaz web no lista todavía: {str(e)[:100]}...")
-            time.sleep(espera_entre_intentos)
+            sleep_interruptible(espera_entre_intentos)
         finally:
             if driver:
                 try:
@@ -211,7 +245,9 @@ def get_version_from_device(ip, usuario, contrasena, max_reintentos=5):
     """
     Obtiene la versión de firmware del dispositivo a través de SSH con reintentos.
     """
+    check_cancel()
     for intento in range(max_reintentos):
+        check_cancel()
         ssh_client = None
         try:
             ssh_client = paramiko.SSHClient()
@@ -234,7 +270,7 @@ def get_version_from_device(ip, usuario, contrasena, max_reintentos=5):
         except Exception as e:
             print(f"[{intento+1}/{max_reintentos}] Error al obtener la versión: {e}")
             if intento < max_reintentos - 1:
-                time.sleep(5)  # Espera antes del siguiente intento
+                sleep_interruptible(5)  # Espera antes del siguiente intento
         finally:
             if ssh_client:
                 try:
@@ -265,6 +301,8 @@ def get_mac_from_ifconfig(ip, usuario, contrasena):
 
         mac_address = match_mac.group(1).replace(':', '').upper() if match_mac else "Desconocida"
         return mac_address
+    except (KeyboardInterrupt, SystemExit):
+        raise
     except Exception as e:
         print(f"Error al obtener la dirección MAC: {e}")
         return "Desconocida"
@@ -278,8 +316,10 @@ def buscar_dispositivo_en_rango(base_ip='192.168.1.', inicio=11, fin=18, espera=
     Busca la primera IP que responda a ping en el rango especificado.
     Retorna la IP completa como string, o lanza excepción si no encuentra ninguna.
     """
+    check_cancel()
     print(f"[Búsqueda] Escanenado rango {base_ip}{inicio} - {base_ip}{fin} en busca de dispositivo...")
     for octeto in range(inicio, fin + 1):
+        check_cancel()
         ip = f"{base_ip}{octeto}"
         # Usamos un ping rápido de 1 intento con timeout corto
         try:
@@ -287,9 +327,11 @@ def buscar_dispositivo_en_rango(base_ip='192.168.1.', inicio=11, fin=18, espera=
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
                 print(f"[Búsqueda] Encontrado dispositivo en: {ip}")
                 return ip
+        except (KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             pass
-        time.sleep(espera)
+        sleep_interruptible(espera)
     raise RuntimeError(f"No se encontró ningún dispositivo respondiendo en {base_ip}{inicio}-{base_ip}{fin}")
 
 
@@ -324,9 +366,11 @@ def modificar_cfg_para_ip(ruta_cfg_original, nueva_ip_final, ruta_cfg_modificada
 # CONFIGURACIÓN SELENIUM
 # -------------------
 def configurar_inicial(ip):
+    check_cancel()
     # Esperar explícitamente que la interfaz web esté ready antes de Selenium
-    esperar_web(ip, puerto=443)
+    esperar_web(ip, puerto=443, verbose=True)
 
+    check_cancel()
     print("[Selenium] Abriendo navegador para configuración inicial...")
     chrome_options = Options()
     chrome_options.add_argument("--ignore-certificate-errors")
@@ -337,6 +381,7 @@ def configurar_inicial(ip):
     driver = webdriver.Chrome(service=service, options=chrome_options)
 
     try:
+        check_cancel()
         driver.get(f"https://{ip}")
         wait = WebDriverWait(driver, 15)
 
@@ -345,7 +390,7 @@ def configurar_inicial(ip):
         print("✅ Idioma seleccionado (Español)")
 
         wait.until(EC.staleness_of(language_select))
-        time.sleep(1)
+        sleep_interruptible(1)
 
         country_select = wait.until(EC.presence_of_element_located((By.ID, "loginform-country")))
         Select(country_select).select_by_value("484")  # México
@@ -371,7 +416,7 @@ def configurar_inicial(ip):
         
         # Verificar bypass para firmwares v8.7.19+ (Mínimo 12 caracteres)
         try:
-            time.sleep(1.5)
+            sleep_interruptible(1.5)
             pwd_input = driver.find_element(By.ID, "loginform-new-password")
             if pwd_input.is_displayed():
                 print("⚠️ Detectada validación de firmware v19+ (mínimo 12 caracteres). Inyectando contraseña temporal larga...")
@@ -384,13 +429,15 @@ def configurar_inicial(ip):
                 save_btn = driver.find_element(By.CSS_SELECTOR, ".loginform-submit")
                 save_btn.click()
                 print("✅ Botón Guardar presionado con contraseña extendida (Siip.123456789).")
-                time.sleep(2)
+                sleep_interruptible(2)
                 return "Siip.123456789"
+        except KeyboardInterrupt:
+            raise
         except Exception:
             pass
 
         print("✅ Configuración inicial completada!")
-        time.sleep(8)  # Pausa Larga (8s): La antena reinicia servicios web y ssh al aplicarse una nueva contraseña.
+        sleep_interruptible(8)  # Pausa Larga (8s): La antena reinicia servicios web y ssh al aplicarse una nueva contraseña.
         return PASSWORD
 
     finally:
@@ -418,6 +465,7 @@ def subir_cfg(ssh, archivo_local):
     stdout.channel.recv_exit_status()  # Bloquear hasta terminar
 
 def aplicar_cfg_y_reiniciar(ssh):
+    check_cancel()
     print("   [SSH] Escribiendo configuración en memoria flash (cfgmtd)...")
     stdin, stdout, stderr = ssh.exec_command("cfgmtd -w -p /etc")
     # Esperar a que termine de escribir antes de reiniciar
@@ -425,10 +473,11 @@ def aplicar_cfg_y_reiniciar(ssh):
     if status != 0:
         print(f"⚠️ cfgmtd reportó estado {status}")
         
+    check_cancel()
     print("   [SSH] Reiniciando la antena...")
     ssh.exec_command("reboot")
     # No esperamos recv_exit_status aquí porque la red se cae intencionalmente
-    time.sleep(2)
+    sleep_interruptible(2)
     try:
         ssh.close()
     except:
@@ -504,7 +553,9 @@ def actualizar_firmware(ip, usuario, contrasena, archivo_local, archivo_remoto):
             comando_final = f'fwupdate.real -m {archivo_remoto}'
             # Ejecutar el comando sin esperar respuesta (get_pty=True para forzar la ejecución inmediata)
             ssh_client.exec_command(comando_final, timeout=5, get_pty=True)
-        except:
+        except KeyboardInterrupt:
+            raise
+        except Exception:
             # Ignorar cualquier error de comunicación, es esperado que la conexión se corte
             pass
         
@@ -528,6 +579,7 @@ def actualizar_firmware(ip, usuario, contrasena, archivo_local, archivo_remoto):
         
         # Mostrar una cuenta regresiva (reducida para el usuario, detallada para la GUI)
         for segundos in range(total_espera, 0, -1):
+            check_cancel()
             # Calcular progreso: de 18% a 90% durante los 100 segundos
             progress_in_wait = 18 + int((total_espera - segundos) / total_espera * 72)
             # Notificar a la GUI cada segundo para la barra de progreso
@@ -540,7 +592,7 @@ def actualizar_firmware(ip, usuario, contrasena, archivo_local, archivo_remoto):
             elif segundos == 5:
                 print(f"   ⌛ Tiempo restante: {segundos} segundos...")
             
-            time.sleep(1)
+            sleep_interruptible(1)
         
         print("\n✅ Tiempo de actualización completado")
         print("   Verificando conectividad y versión de la antena...")
@@ -550,15 +602,15 @@ def actualizar_firmware(ip, usuario, contrasena, archivo_local, archivo_remoto):
         # Después de los 90 segundos, verificamos que la antena responda
         try:
             # Primero esperamos ping con timeout reducido ya que debería estar lista
-            esperar_ping(ip, intentos=30, espera=1)  # 30 segundos máximo
-            time.sleep(5)  # Pequeña pausa después del ping
+            esperar_ping(ip, intentos=30, espera=1, verbose=True)  # 30 segundos máximo
+            sleep_interruptible(5)  # Pequeña pausa después del ping
             print("[GUI] PHASE_PROGRESS: firmware_update, 94")
             # Luego esperamos SSH
-            esperar_ssh(ip, puerto=22, reintentos=60)
-            time.sleep(5)
+            esperar_ssh(ip, puerto=22, reintentos=60, verbose=True)
+            sleep_interruptible(5)
             print("[GUI] PHASE_PROGRESS: firmware_update, 96")
             # Finalmente esperamos la interfaz web
-            esperar_web(ip, puerto=443, reintentos=60)
+            esperar_web(ip, puerto=443, reintentos=60, verbose=True)
             try:
                 if verificar_interfaz_web_lista(ip):
                     print("✅ Interfaz web completamente disponible")
@@ -693,9 +745,11 @@ def run_all(range_start=11, range_end=18, backup_cfg=None, archivo_local_fw=None
         """
         Escanea IPs en el rango y regresa una lista de las que responden a ping.
         """
+        check_cancel()
         encontrados = []
         import sys
         for octeto in range(inicio, fin + 1):
+            check_cancel()
             ip = f"{base_ip}{octeto}"
             # En macOS -W es en milisegundos, en Linux en segundos
             timeout_val = "1000" if sys.platform == 'darwin' else "1"
@@ -715,6 +769,7 @@ def run_all(range_start=11, range_end=18, backup_cfg=None, archivo_local_fw=None
     if not lista_ips:
         print('No se encontraron antenas para configurar.')
     for IP_INICIAL in lista_ips:
+        check_cancel()
         print(f"\n{'='*80}")
         print(f"PROCESANDO ANTENA EN {IP_INICIAL}")
         print(f"[GUI] START_ANTENNA: {IP_INICIAL}")
@@ -765,8 +820,8 @@ def run_all(range_start=11, range_end=18, backup_cfg=None, archivo_local_fw=None
             print("\n--- FASE 1: Configuración Inicial ---")
             print("1. Verificando conectividad inicial...")
             print("[GUI] PHASE_PROGRESS: detection, 0")
-            esperar_ping(IP_INICIAL)
-            esperar_web(IP_INICIAL, puerto=443)
+            esperar_ping(IP_INICIAL, intentos=10, verbose=True)
+            esperar_web(IP_INICIAL, puerto=443, reintentos=15, verbose=True)
             print("[GUI] PHASE_PROGRESS: detection, 100")
 
             # FASE 1 Solo si NO es update_only
@@ -780,8 +835,23 @@ def run_all(range_start=11, range_end=18, backup_cfg=None, archivo_local_fw=None
 
                 print("\n3. Aplicando configuración por SSH...")
                 print("[GUI] PHASE_PROGRESS: ssh_config, 0")
-                esperar_ssh(IP_INICIAL)
-                ssh = conectar(IP_INICIAL, passwd=passw_fase1)
+                esperar_ssh(IP_INICIAL, reintentos=15, verbose=True)
+                # En modo 'config' probamos contraseñas en orden: la estándar, la larga (v19+) y la de fábrica
+                ssh = None
+                for intento_pwd in [passw_fase1, PASSWORD_LARGA, 'ubnt']:
+                    try:
+                        ssh = conectar(IP_INICIAL, passwd=intento_pwd)
+                        if ssh:
+                            print(f"   [SSH] Conectado con credencial: {intento_pwd[:6]}...")
+                            passw_fase1 = intento_pwd  # guardar la que funcionó
+                            break
+                    except paramiko.AuthenticationException:
+                        print(f"   [SSH] Contraseña '{intento_pwd[:6]}...' incorrecta, probando siguiente...")
+                    except Exception as e_pwd:
+                        print(f"   [SSH] Error con contraseña '{intento_pwd[:6]}...': {e_pwd}")
+                        break
+                if not ssh:
+                    raise paramiko.AuthenticationException("Ninguna contraseña conocida funcionó.")
                 print("[GUI] PHASE_PROGRESS: ssh_config, 30")
                 cfg_temporal = modificar_cfg_para_ip(BACKUP_CFG, IP_FINAL)
                 subir_cfg(ssh, cfg_temporal)
@@ -804,11 +874,11 @@ def run_all(range_start=11, range_end=18, backup_cfg=None, archivo_local_fw=None
 
                 print(f"\n4. Esperando que la antena reinicie con IP {IP_FINAL}...")
                 print("[GUI] PHASE_PROGRESS: reboot, 0")
-                esperar_ping(IP_FINAL)
+                esperar_ping(IP_FINAL, verbose=True)
                 print("[GUI] PHASE_PROGRESS: reboot, 40")
-                esperar_web(IP_FINAL, puerto=443)
+                esperar_web(IP_FINAL, puerto=443, verbose=True)
                 print("[GUI] PHASE_PROGRESS: reboot, 70")
-                esperar_ssh(IP_FINAL)
+                esperar_ssh(IP_FINAL, verbose=True)
                 print("[GUI] PHASE_PROGRESS: reboot, 100")
                 print(f"✅ FASE 1 COMPLETADA: Antena configurada y lista en {IP_FINAL}")
             
@@ -833,8 +903,12 @@ def run_all(range_start=11, range_end=18, backup_cfg=None, archivo_local_fw=None
                         pass
             try:
                 mac_address = get_mac_from_ifconfig(IP_FINAL, USUARIO, PASSWORD)
-            except:
+            except KeyboardInterrupt:
+                raise
+            except Exception:
                 mac_address = "No disponible"
+        except KeyboardInterrupt:
+            raise
         except Exception as e:
             error_txt = str(e)
             print(f"\n❌ ERROR EN ANTENA {IP_INICIAL}: {e}")

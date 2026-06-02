@@ -1184,6 +1184,8 @@ class GuiConfig:
     def start_process(self):
         # Save settings before starting
         self.save_settings()
+        self.cancel_requested = False
+        configuracion_completa_antenas2.cancel_requested = False
         self.console.configure(state='normal')
         self.console.delete('1.0', 'end')
         self.console.configure(state='disabled')
@@ -1240,6 +1242,10 @@ class GuiConfig:
                     backup_cfg=os.environ['BACKUP_CFG'],
                     archivo_local_fw=os.environ['ARCHIVO_LOCAL_FW']
                 )
+        except KeyboardInterrupt:
+            self.queue.put(('line', '\n[GUI] Proceso cancelado por el usuario.\n'))
+            self.queue.put(('finished', None))
+            return
         except Exception as e:
             self.queue.put(('error', f'Error en la ejecución del backend: {e}'))
             import traceback
@@ -1276,6 +1282,10 @@ class GuiConfig:
 
 
     def request_cancel(self):
+        self.cancel_requested = True
+        configuracion_completa_antenas2.cancel_requested = True
+        self.queue.put(('line', '\n[GUI] Cancelación solicitada por el usuario, esperando detención...\n'))
+        
         if self.proc and self.proc.poll() is None:
             try:
                 # Try to send SIGINT first
@@ -1307,7 +1317,11 @@ class GuiConfig:
         self.running = False
         self.start_btn.config(text='Iniciar proceso de configuración')
         self.toggle_inputs(True)
-        self.status_var.set('Terminado')
+        if getattr(self, 'cancel_requested', False):
+            self.status_var.set('Cancelado')
+            self.cancel_requested = False
+        else:
+            self.status_var.set('Terminado')
         # Try to show final CSV if present
         csv_path = os.path.join(os.getcwd(), 'resultados_antenas.csv')
         if os.path.exists(csv_path):
