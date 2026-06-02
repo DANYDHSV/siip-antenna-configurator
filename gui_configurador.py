@@ -324,6 +324,9 @@ class GuiConfig:
         self.running = False
         self.queue = queue.Queue()
         self.successful_ips = []
+        self.scanned_ips = []
+        self.is_retry = False
+        self.retry_ips = []
         self.total_antennas = max(1, int(self.settings.get('range_end', 18)) - int(self.settings.get('range_start', 11)) + 1)
         self.completed_antennas = 0
         
@@ -936,6 +939,34 @@ class GuiConfig:
                 canvas.create_oval(2,4,14,16, fill=inactive_fill, outline=inactive_outline)
             self.root.update_idletasks()
 
+    def _update_naranja_for_index(self, index):
+        self.set_antenna_in_progress_by_index(index)
+        self.progress.config(mode='indeterminate')
+        self.progress.start(10)
+
+    def set_antenna_in_progress_by_index(self, index):
+        if 0 <= index < len(self.antenna_points):
+            canvas = self.antenna_points[index]
+            canvas.delete("all")
+            canvas.create_oval(2,4,14,16, fill='#ffa500', outline='#b36a00')
+            self.root.update_idletasks()
+
+    def update_antenna_icon_by_index(self, index, estado):
+        if 0 <= index < len(self.antenna_points):
+            canvas = self.antenna_points[index]
+            # Detener animación indeterminada
+            self.progress.config(mode='determinate')
+            self.progress.stop()
+            if estado == "ok":
+                self.antenna_icons[index]['image'] = self.antenna_photo_normal
+                canvas.delete("all")
+                canvas.create_oval(2,4,14,16, fill='#14c714', outline='green')
+            elif estado == "fail":
+                self.antenna_icons[index]['image'] = self.antenna_photo_fail
+                canvas.delete("all")
+                canvas.create_oval(2,4,14,16, fill='#fa1e1e', outline='darkred')
+            self.root.update_idletasks()
+
 
     def open_settings(self):
         # Evita ventana doble de ajustes
@@ -1097,14 +1128,58 @@ class GuiConfig:
             pass
         self.root.after(100, self.flush_queue)
 
+    def get_ip_inicial_from_final(self, ip_final):
+        # 1. Si ip_final ya está en scanned_ips, es que ya es la ip inicial (o son iguales)
+        if hasattr(self, 'scanned_ips') and ip_final in self.scanned_ips:
+            return ip_final
+            
+        # 2. Buscar en el CSV la fila correspondiente
+        csv_path = os.path.join(os.getcwd(), 'resultados_antenas.csv')
+        if os.path.exists(csv_path):
+            try:
+                import csv
+                with open(csv_path, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        # Si coincide por ip_final, retornamos su ip_inicial
+                        if row.get('ip_final') == ip_final:
+                            ip_init = row.get('ip_inicial')
+                            if ip_init:
+                                return ip_init
+            except Exception as e:
+                print(f"[DEBUG] Error mapeando ip_final a inicial por CSV: {e}")
+                
+        # 3. Fallback matemático por si no está en el CSV
+        try:
+            octetos = ip_final.split('.')
+            octeto_final = int(octetos[-1])
+            # Si el octeto inicial era octeto_final + 10 (rango 11-18)
+            octeto_inicial = octeto_final + 10
+            ip_inicial_fallback = f"{'.'.join(octetos[:-1])}.{octeto_inicial}"
+            return ip_inicial_fallback
+        except Exception:
+            pass
+            
+        return ip_final
+
     def parse_progress(self, line):
         # Detectar inicio de antena (opcional, para debug o validación)
         if '[GUI] START_ANTENNA:' in line:
             # Resetear fase actual para esta antena
             self.current_phase = None
             self.current_phase_progress = 0
-            # Poner icono en naranja (en progreso)
-            self._update_naranja()
+            try:
+                ip = line.split(':', 1)[1].strip()
+                mapped_ip = self.get_ip_inicial_from_final(ip)
+                if hasattr(self, 'scanned_ips') and mapped_ip in self.scanned_ips:
+                    idx = self.scanned_ips.index(mapped_ip)
+                    self.active_idx = idx
+                    self._update_naranja_for_index(idx)
+                else:
+                    self._update_naranja()
+            except Exception as e:
+                print(f"Error parsing START_ANTENNA: {e}")
+                self._update_naranja()
             
         # Detectar fin de antena con estado explícito
         if '[GUI] END_ANTENNA:' in line:
@@ -1113,8 +1188,13 @@ class GuiConfig:
                 if len(parts) >= 2:
                     ip = parts[0].strip()
                     status = parts[1].strip()
-                    # Actualizar icono y progreso
-                    self.update_antenna_icon(status)
+                    
+                    mapped_ip = self.get_ip_inicial_from_final(ip)
+                    if hasattr(self, 'scanned_ips') and mapped_ip in self.scanned_ips:
+                        idx = self.scanned_ips.index(mapped_ip)
+                        self.update_antenna_icon_by_index(idx, status)
+                    else:
+                        self.update_antenna_icon(status)
                     
                     self.completed_antennas += 1
                     self.progress['value'] = self.completed_antennas
@@ -1192,9 +1272,11 @@ class GuiConfig:
                 import ast
                 ips = ast.literal_eval(content)
                 if isinstance(ips, list) and len(ips) > 0:
-                    self.total_antennas = len(ips)
-                    # Re-inicializar iconos en el hilo principal
-                    self.root.after(0, self.init_antenna_icons)
+                    if not getattr(self, 'is_retry', False):
+                        self.total_antennas = len(ips)
+                        self.scanned_ips = ips
+                        # Re-inicializar iconos en el hilo principal
+                        self.root.after(0, self.init_antenna_icons)
             except Exception as e:
                 print(f"Error parsing IPs: {e}")
 
@@ -1219,6 +1301,8 @@ class GuiConfig:
         self.cancel_requested = False
         configuracion_completa_antenas2.cancel_requested = False
         self.successful_ips = []
+        self.is_retry = False
+        self.retry_ips = []
         if hasattr(self, 'open_ips_btn'):
             self.open_ips_btn.pack_forget()
         self.console.configure(state='normal')
@@ -1248,7 +1332,14 @@ class GuiConfig:
         # Preparar variables de entorno (el backend las lee de os.environ)
         os.environ['ARCHIVO_LOCAL_FW'] = self.settings.get('archivo_firmware', '')
         os.environ['BACKUP_CFG'] = self.settings.get('backup_cfg', '')
-        os.environ['MODO_FLUJO'] = self.settings.get('modo_flujo', 'full')
+        
+        is_retry_run = getattr(self, 'is_retry', False)
+        retry_ips = getattr(self, 'retry_ips', None)
+        
+        if is_retry_run and retry_ips:
+            os.environ['MODO_FLUJO'] = 'update_only'
+        else:
+            os.environ['MODO_FLUJO'] = self.settings.get('modo_flujo', 'full')
         
         # Enviar rango correcto según el modo
         if os.environ['MODO_FLUJO'] == 'update_only':
@@ -1262,8 +1353,9 @@ class GuiConfig:
         os.environ['RANGE_END'] = str(r_end)
         os.environ['PYTHONUNBUFFERED'] = '1'
 
-        self.root.after(0, self.init_antenna_icons)
-        self.active_idx = 0
+        if not is_retry_run:
+            self.root.after(0, self.init_antenna_icons)
+            self.active_idx = 0
         macs_encontradas = []
 
         try:
@@ -1275,7 +1367,8 @@ class GuiConfig:
                     range_start=r_start,
                     range_end=r_end,
                     backup_cfg=os.environ['BACKUP_CFG'],
-                    archivo_local_fw=os.environ['ARCHIVO_LOCAL_FW']
+                    archivo_local_fw=os.environ['ARCHIVO_LOCAL_FW'],
+                    target_ips=retry_ips if is_retry_run else None
                 )
         except KeyboardInterrupt:
             self.queue.put(('line', '\n[GUI] Proceso cancelado por el usuario.\n'))
@@ -1304,7 +1397,6 @@ class GuiConfig:
         except Exception as e:
             print(f"[DEBUG] Error leyendo MACs finales: {e}")
 
-        self.root.after(0, self.show_mac_summary, macs_encontradas)
         self.root.after(0, self.progress.stop)
         self.root.after(0, lambda: self.progress.config(mode='determinate'))
         self.queue.put(('finished', None))
@@ -1352,12 +1444,36 @@ class GuiConfig:
         self.running = False
         self.start_btn.config(text='Iniciar proceso de configuración')
         self.toggle_inputs(True)
+        
+        # Cargar los resultados en la tabla
+        self.load_results_from_csv()
+        
         if getattr(self, 'cancel_requested', False):
             self.status_var.set('Cancelado')
             self.cancel_requested = False
+            self.show_final_csv_summary()
+            if hasattr(self, 'notebook'):
+                self.notebook.select(self.tab_resultados)
         else:
             self.status_var.set('Terminado')
-        # Try to show final CSV if present
+            
+            # Si NO es un reintento, ver si hay fallas y preguntar si se desea reintentar
+            is_retry_run = getattr(self, 'is_retry', False)
+            if not is_retry_run:
+                failed_ips = self.get_failed_antennas()
+                if failed_ips:
+                    msg = f"Se detectaron fallos en la actualización de {len(failed_ips)} antena(s).\n\n¿Deseas realizar un último intento de actualización con estas IPs?"
+                    if messagebox.askyesno("Reintento de Actualización", msg, parent=self.root):
+                        self.root.after(100, lambda: self.start_retry_process(failed_ips))
+                        return
+                        
+            # Si llegamos aquí: no hubo fallas, el usuario rechazó el reintento o ya era un reintento
+            self.is_retry = False
+            self.show_final_csv_summary()
+            if hasattr(self, 'notebook'):
+                self.notebook.select(self.tab_resultados)
+
+    def show_final_csv_summary(self):
         csv_path = os.path.join(os.getcwd(), 'resultados_antenas.csv')
         if os.path.exists(csv_path):
             try:
@@ -1367,6 +1483,59 @@ class GuiConfig:
                 self.append_console(data + '\n')
             except Exception:
                 pass
+
+    def get_failed_antennas(self):
+        """Lee el CSV y regresa la lista de ip_final para las antenas que fallaron"""
+        import csv
+        csv_path = os.path.join(os.getcwd(), 'resultados_antenas.csv')
+        if not os.path.exists(csv_path):
+            return []
+            
+        failed_ips = []
+        try:
+            with open(csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    exito_val = str(row.get('exito', '')).lower()
+                    exito_bool = exito_val in ['1', 'true', 'yes']
+                    if not exito_bool:
+                        ip_final = row.get('ip_final')
+                        if ip_final and ip_final != '-':
+                            failed_ips.append(ip_final)
+        except Exception as e:
+            print(f"Error checking failures: {e}")
+        return failed_ips
+
+    def start_retry_process(self, failed_ips):
+        self.is_retry = True
+        self.retry_ips = failed_ips
+        
+        self.cancel_requested = False
+        configuracion_completa_antenas2.cancel_requested = False
+        self.successful_ips = []
+        if hasattr(self, 'open_ips_btn'):
+            self.open_ips_btn.pack_forget()
+            
+        self.console.configure(state='normal')
+        self.console.delete('1.0', 'end')
+        self.console.configure(state='disabled')
+        
+        # No re-inicializamos iconos visuales, mantenemos los colores anteriores (verdes/rojos)
+        self.total_antennas = len(failed_ips)
+        self.progress.configure(mode='determinate')
+        self.progress['maximum'] = self.total_antennas
+        self.progress['value'] = 0
+        self.completed_antennas = 0
+        
+        self.start_btn.config(text='Cancelar proceso')
+        self.running = True
+        self.status_var.set('Reintentando actualización...')
+        
+        self.toggle_inputs(False)
+        
+        # Lanzar hilo secundario para el reintento
+        self.proc_thread = threading.Thread(target=self.run_subprocess, daemon=True)
+        self.proc_thread.start()
 
 
     def _update_naranja(self):

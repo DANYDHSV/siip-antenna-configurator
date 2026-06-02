@@ -2,6 +2,12 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [1.4.0] - 2026-06-02
+### 🌟 Nuevas Funcionalidades
+- **Reintento de Actualización Automático**: Al finalizar el proceso completo, si se detecta que alguna de las antenas falló en su actualización de firmware, la aplicación mostrará una ventana emergente de confirmación preguntando al usuario si desea realizar un último intento de actualización con esas IPs finales fallidas.
+- **Mapeo Inteligente de Indicadores en Reintento**: Durante la segunda vuelta de actualización (reintento), los puntos indicadores visuales de las antenas ya exitosas se mantienen verdes, mientras que los correspondientes a las antenas fallidas pasan a amarillo/naranja intermitente mientras se procesan, y finalmente se actualizan a verde o rojo según su resultado final.
+- **Fusión Inteligente No Destructiva de CSV**: El motor de resultados en el backend fusiona los nuevos estados de éxito y las direcciones MAC obtenidas en el reintento directamente sobre las filas correspondientes del archivo `resultados_antenas.csv` (emparejando por IP inicial o final) en lugar de duplicar filas, manteniendo el historial completo intacto.
+
 ## [1.3.0] - 2026-06-02
 ### 🌟 Nuevas Funcionalidades
 - **Cancelación Cooperativa**: Se implementó una arquitectura de detención cooperativa entre la interfaz gráfica (`gui_configurador.py`) y el backend (`configuracion_completa_antenas2.py`) usando una bandera de estado compartida (`cancel_requested`) y una excepción dedicada (`ProcesoCancelado`) basada en `KeyboardInterrupt`. Ahora el botón "Cancelar proceso" interrumpe de inmediato cualquier hilo de ejecución activo de manera limpia y responsiva.

@@ -677,10 +677,10 @@ def actualizar_firmware(ip, usuario, contrasena, archivo_local, archivo_remoto):
 # -------------------
 # Run logic as an importable function
 # -------------------
-def run_all(range_start=11, range_end=18, backup_cfg=None, archivo_local_fw=None, csv_file='resultados_antenas.csv', callback=None):
+def run_all(range_start=11, range_end=18, backup_cfg=None, archivo_local_fw=None, csv_file='resultados_antenas.csv', callback=None, target_ips=None):
     # Modo flujo: 'config' = solo configurar (sin Selenium, sin update), 'full' = flujo completo.
     modo_flujo = os.environ.get('MODO_FLUJO', 'full')
-    """Ejecuta todo el flujo de configuración y actualización para el rango indicado.
+    """Ejecuta todo el flujo de configuración y actualización para el rango indicado o IPs específicas.
     Devuelve la lista de resultados.
     """
     # Allow callers to override module-level globals for file paths and recompute version
@@ -760,9 +760,15 @@ def run_all(range_start=11, range_end=18, backup_cfg=None, archivo_local_fw=None
                 print(f"[SCAN] IP sin respuesta: {ip}")
         return encontrados
 
-    print("\n=== ESCANEANDO IPs DISPONIBLES EN EL RANGO ===")
-    lista_ips = scan_active_ips()
-    print(f"\nIPs activas encontradas: {lista_ips}\n")
+    if target_ips is not None:
+        lista_ips = target_ips
+        print(f"\nUsando IPs específicas para reintento: {lista_ips}\n")
+        # Imprimir para que la GUI también registre las IPs activas
+        print(f"IPs activas encontradas: {lista_ips}")
+    else:
+        print("\n=== ESCANEANDO IPs DISPONIBLES EN EL RANGO ===")
+        lista_ips = scan_active_ips()
+        print(f"\nIPs activas encontradas: {lista_ips}\n")
 
     resultados = []
     idx_icono = 0
@@ -972,22 +978,72 @@ def run_all(range_start=11, range_end=18, backup_cfg=None, archivo_local_fw=None
         mac = r.get('mac', 'No disponible')
         print(f"{ip_ini:15} {ip_fin:15} {mac:20} {estado:10}")
 
-    # Exportar resumen a CSV
+    # Exportar resumen a CSV (Fusión inteligente no destructiva)
     try:
+        existing_results = {}
+        if os.path.exists(csv_file):
+            try:
+                with open(csv_file, 'r', encoding='utf-8') as cf:
+                    reader = csv.DictReader(cf)
+                    for row in reader:
+                        ip_init = row.get('ip_inicial')
+                        if ip_init:
+                            existing_results[ip_init] = row
+            except Exception as read_err:
+                print(f"⚠️  No se pudo leer el CSV existente para fusionar: {read_err}")
+
+        # Integrar los resultados de esta ejecución sin duplicar
+        for r in resultados:
+            ip_init = r.get('ip_inicial')
+            ip_fin = r.get('ip_final')
+            
+            # Buscar una fila existente que corresponda a esta antena
+            found_key = None
+            for key, row in existing_results.items():
+                if (key == ip_init or 
+                    row.get('ip_final') == ip_init or 
+                    row.get('ip_inicial') == ip_init or 
+                    (ip_fin and row.get('ip_final') == ip_fin)):
+                    found_key = key
+                    break
+            
+            if found_key:
+                # Actualizar el registro existente
+                existing_results[found_key]['exito'] = str(r.get('exito', False))
+                existing_results[found_key]['error'] = r.get('error', '')
+                if r.get('mac') and r.get('mac') != 'No disponible':
+                    existing_results[found_key]['mac'] = r.get('mac')
+                if r.get('ip_final') and r.get('ip_final') != '-':
+                    existing_results[found_key]['ip_final'] = r.get('ip_final')
+            else:
+                # Insertar como nuevo registro
+                if ip_init:
+                    existing_results[ip_init] = {
+                        'ip_inicial': ip_init,
+                        'ip_final': r.get('ip_final', ''),
+                        'mac': r.get('mac', ''),
+                        'exito': str(r.get('exito', False)),
+                        'error': r.get('error', '')
+                    }
+
+        # Escribir todos los resultados combinados de nuevo al archivo
         with open(csv_file, 'w', newline='', encoding='utf-8') as cf:
             writer = csv.writer(cf)
             writer.writerow(['ip_inicial', 'ip_final', 'mac', 'exito', 'error'])
-            for r in resultados:
+            for ip_init, r_data in existing_results.items():
+                # Asegurar formato booleano limpio para 'exito'
+                exito_bool_str = str(r_data.get('exito', 'False')).lower()
+                exito_val = 'True' if exito_bool_str in ['1', 'true', 'yes'] else 'False'
                 writer.writerow([
-                    r.get('ip_inicial', ''),
-                    r.get('ip_final', ''),
-                    r.get('mac', ''),
-                    r.get('exito', False),
-                    r.get('error', '')
+                    ip_init,
+                    r_data.get('ip_final', ''),
+                    r_data.get('mac', ''),
+                    exito_val,
+                    r_data.get('error', '')
                 ])
-        print(f"\n✅ Resumen exportado a CSV: {csv_file}")
+        print(f"\n✅ Resumen fusionado y exportado a CSV: {csv_file}")
     except Exception as e:
-        print(f"⚠️  No se pudo exportar el CSV: {e}")
+        print(f"⚠️  No se pudo exportar/fusionar el CSV: {e}")
 
     return resultados
 
