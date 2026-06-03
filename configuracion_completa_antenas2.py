@@ -981,7 +981,7 @@ def run_all(range_start=11, range_end=18, backup_cfg=None, archivo_local_fw=None
     # Exportar resumen a CSV (Fusión inteligente no destructiva)
     try:
         existing_results = {}
-        if os.path.exists(csv_file):
+        if target_ips is not None and os.path.exists(csv_file):
             try:
                 with open(csv_file, 'r', encoding='utf-8') as cf:
                     reader = csv.DictReader(cf)

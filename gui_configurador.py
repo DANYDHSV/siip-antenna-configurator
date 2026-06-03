@@ -1311,6 +1311,19 @@ class GuiConfig:
         self.successful_ips = []
         self.is_retry = False
         self.retry_ips = []
+        
+        # Borrar resultados previos para iniciar limpio
+        csv_path = os.path.join(os.getcwd(), 'resultados_antenas.csv')
+        if os.path.exists(csv_path):
+            try:
+                os.remove(csv_path)
+            except Exception as e:
+                print(f"[DEBUG] No se pudo borrar CSV anterior: {e}")
+                
+        # Limpiar tabla de resultados visual
+        for item in self.results_tree.get_children():
+            self.results_tree.delete(item)
+            
         if hasattr(self, 'open_ips_btn'):
             self.open_ips_btn.pack_forget()
         self.console.configure(state='normal')
