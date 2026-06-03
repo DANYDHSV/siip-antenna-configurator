@@ -288,8 +288,8 @@ class GuiConfig:
 
     def update_progress_fraction(self, frac):
         # Solo avanza para la antena en curso (active_idx, nunca suma a completed_antennas aquí)
-        self.progress.config(mode='determinate')
         self.progress.stop()
+        self.progress.config(mode='determinate')
         barra = self.active_idx + frac
         # La barra nunca retrocede: progreso no menor al valor anterior
         if barra > self.progress['value']:
@@ -297,6 +297,7 @@ class GuiConfig:
         self.root.update_idletasks()
     def _update_naranja(self):
         self.set_antenna_in_progress()
+        self.progress.stop()
         self.progress.config(mode='indeterminate')
         self.progress.start(10)  # Valor pequeño, animación visible
     def set_antenna_in_progress(self):
@@ -941,6 +942,7 @@ class GuiConfig:
 
     def _update_naranja_for_index(self, index):
         self.set_antenna_in_progress_by_index(index)
+        self.progress.stop()
         self.progress.config(mode='indeterminate')
         self.progress.start(10)
 
@@ -955,8 +957,8 @@ class GuiConfig:
         if 0 <= index < len(self.antenna_points):
             canvas = self.antenna_points[index]
             # Detener animación indeterminada
-            self.progress.config(mode='determinate')
             self.progress.stop()
+            self.progress.config(mode='determinate')
             if estado == "ok":
                 self.antenna_icons[index]['image'] = self.antenna_photo_normal
                 canvas.delete("all")
@@ -1238,6 +1240,12 @@ class GuiConfig:
                         
                         # Calcular progreso total
                         total_progress = self.completed_antennas + (antenna_progress / 100.0)
+                        
+                        # Si está en modo indeterminado, detener y pasar a determinado para avanzar
+                        if str(self.progress.cget('mode')) == 'indeterminate':
+                            self.progress.stop()
+                            self.progress.config(mode='determinate')
+                            
                         self.progress['value'] = min(self.total_antennas, total_progress)
                         
                         # Actualizar estado
@@ -1308,6 +1316,7 @@ class GuiConfig:
         self.console.configure(state='normal')
         self.console.delete('1.0', 'end')
         self.console.configure(state='disabled')
+        self.progress.stop()
         self.progress.configure(mode='determinate')
         self.progress['maximum'] = self.total_antennas
         self.progress['value'] = 0
@@ -1522,6 +1531,7 @@ class GuiConfig:
         
         # No re-inicializamos iconos visuales, mantenemos los colores anteriores (verdes/rojos)
         self.total_antennas = len(failed_ips)
+        self.progress.stop()
         self.progress.configure(mode='determinate')
         self.progress['maximum'] = self.total_antennas
         self.progress['value'] = 0
