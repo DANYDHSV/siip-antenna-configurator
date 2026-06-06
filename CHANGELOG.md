@@ -2,6 +2,15 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [1.5.0] - 2026-06-06
+### 🌟 Nuevas Funcionalidades
+- **Validación Automatizada con Selenium y Auto-Login**: El botón "Abrir IPs Exitosas" ahora ejecuta una instancia controlada de Google Chrome con Selenium. 
+  - Abre todas las IPs exitosas de la ejecución en pestañas de una única ventana.
+  - Ignora errores de seguridad y certificados auto-firmados SSL (HTTP/HTTPS).
+  - Automáticamente rellena las credenciales de administración (`ubnt` / `Siip.567`) e inicia sesión en cada una de ellas por separado.
+  - Mantiene las pestañas abiertas y el navegador acoplado/activo (utilizando la opción experimental `detach`), permitiendo a los técnicos tomar control inmediato del panel de control de las antenas sin reintroducir credenciales.
+  - Se ejecuta en segundo plano para no congelar la interfaz gráfica de la aplicación.
+
 ## [1.4.0] - 2026-06-02
 ### 🌟 Nuevas Funcionalidades
 - **Reintento de Actualización Automático**: Al finalizar el proceso completo, si se detecta que alguna de las antenas falló en su actualización de firmware, la aplicación mostrará una ventana emergente de confirmación preguntando al usuario si desea realizar un último intento de actualización con esas IPs finales fallidas.
