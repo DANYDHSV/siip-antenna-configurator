@@ -263,17 +263,100 @@ class GuiConfig:
             self.status_var.set('No hay MACs válidas para copiar')
 
     def open_successful_ips(self):
-        """Abre todas las IPs exitosas en pestañas del navegador predeterminado"""
+        """Abre todas las IPs exitosas en un navegador Selenium con inicio de sesión automático"""
         if not hasattr(self, 'successful_ips') or not self.successful_ips:
             return
             
+        threading.Thread(target=self._open_selenium_tabs, daemon=True).start()
+
+    def _open_selenium_tabs(self):
         try:
-            for ip in self.successful_ips:
+            self.status_var.set("Iniciando navegador Selenium...")
+            
+            from selenium import webdriver
+            from selenium.webdriver.chrome.service import Service
+            from selenium.webdriver.chrome.options import Options
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.common.keys import Keys
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            from webdriver_manager.chrome import ChromeDriverManager
+            import os
+            import sys
+            
+            chrome_options = Options()
+            chrome_options.add_argument("--ignore-certificate-errors")
+            chrome_options.add_argument("--allow-insecure-localhost")
+            chrome_options.add_argument("--start-maximized")
+            chrome_options.add_experimental_option("detach", True)
+            
+            if sys.platform == 'darwin':
+                path_chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+                if os.path.exists(path_chrome):
+                    chrome_options.binary_location = path_chrome
+            
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            
+            for idx, ip in enumerate(self.successful_ips):
                 url = f"https://{ip}"
-                webbrowser.open_new_tab(url)
-            self.status_var.set(f"Abiertas {len(self.successful_ips)} IPs en el navegador")
+                
+                self.status_var.set(f"Abriendo {ip}...")
+                
+                if idx > 0:
+                    driver.execute_script("window.open('');")
+                    driver.switch_to.window(driver.window_handles[-1])
+                
+                try:
+                    driver.get(url)
+                    
+                    # Esperar a que cargue el campo de usuario
+                    wait = WebDriverWait(driver, 8)
+                    username_input = None
+                    for selector in [("id", "username"), ("name", "username"), ("id", "loginform-username")]:
+                        try:
+                            if selector[0] == "id":
+                                username_input = wait.until(EC.presence_of_element_located((By.ID, selector[1])))
+                            elif selector[0] == "name":
+                                username_input = wait.until(EC.presence_of_element_located((By.NAME, selector[1])))
+                            if username_input:
+                                break
+                        except:
+                            continue
+                            
+                    if username_input:
+                        username_input.clear()
+                        username_input.send_keys("ubnt")
+                        
+                        password_input = None
+                        for selector in [("id", "password"), ("name", "password"), ("id", "loginform-password")]:
+                            try:
+                                if selector[0] == "id":
+                                    password_input = driver.find_element(By.ID, selector[1])
+                                elif selector[0] == "name":
+                                    password_input = driver.find_element(By.NAME, selector[1])
+                                if password_input:
+                                    break
+                            except:
+                                continue
+                                
+                        if password_input:
+                            password_input.clear()
+                            password_input.send_keys("Siip.567")
+                            password_input.send_keys(Keys.ENTER)
+                            print(f"[AUTO-LOGIN] Credenciales enviadas para {ip}")
+                        else:
+                            print(f"[AUTO-LOGIN] No se encontró campo de contraseña para {ip}")
+                    else:
+                        print(f"[AUTO-LOGIN] No se encontró campo de usuario para {ip}")
+                except Exception as get_err:
+                    print(f"❌ Error al conectar o hacer login en {ip}: {get_err}")
+                    
+            self.status_var.set(f"Abiertas {len(self.successful_ips)} IPs en Selenium con inicio de sesión")
+            
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudo abrir el navegador: {e}", parent=self.root)
+            self.root.after(0, lambda: messagebox.showerror("Error", f"No se pudo iniciar Selenium: {e}", parent=self.root))
+            self.status_var.set("Error al iniciar Selenium")
 
     def copy_console_log(self):
         """Copia el contenido de la consola al portapapeles"""
