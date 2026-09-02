@@ -9,65 +9,6 @@ import json
 import queue
 import importlib
 
-
-def pointer_monitor_geometry(root, width, height):
-    """Devuelve una posición centrada en el monitor que contiene el puntero."""
-    try:
-        pointer_x = root.winfo_pointerx()
-        pointer_y = root.winfo_pointery()
-
-        # macOS expone las pantallas en coordenadas globales mediante Quartz.
-        if sys.platform == 'darwin':
-            try:
-                from Quartz import CGDisplayBounds, CGMainDisplayID, CGEventCreate, CGEventGetLocation
-                point = CGEventGetLocation(CGEventCreate(None))
-                displays = []
-                from Quartz import CGGetActiveDisplayList
-                _, display_ids = CGGetActiveDisplayList(16, None, None)
-                for display_id in display_ids:
-                    bounds = CGDisplayBounds(display_id)
-                    displays.append((bounds.origin.x, bounds.origin.y,
-                                     bounds.size.width, bounds.size.height))
-                pointer_x, pointer_y = point.x, point.y
-                for left, bottom, screen_width, screen_height in displays:
-                    # Quartz usa origen inferior izquierdo.
-                    top = -bottom - screen_height
-                    if left <= pointer_x < left + screen_width and top <= pointer_y < top + screen_height:
-                        return (int(left + (screen_width - width) / 2),
-                                int(top + (screen_height - height) / 2))
-            except Exception:
-                pass
-
-        # Windows permite consultar directamente el monitor bajo un punto.
-        if sys.platform == 'win32':
-            import ctypes
-            from ctypes import wintypes
-            class Point(ctypes.Structure):
-                _fields_ = [('x', wintypes.LONG), ('y', wintypes.LONG)]
-            class Rect(ctypes.Structure):
-                _fields_ = [('left', wintypes.LONG), ('top', wintypes.LONG),
-                            ('right', wintypes.LONG), ('bottom', wintypes.LONG)]
-            point = Point(pointer_x, pointer_y)
-            monitor = ctypes.windll.user32.MonitorFromPoint(point, 2)
-            info = Rect()
-            class MonitorInfo(ctypes.Structure):
-                _fields_ = [('cbSize', wintypes.DWORD), ('rcMonitor', Rect),
-                            ('rcWork', Rect), ('dwFlags', wintypes.DWORD)]
-            monitor_info = MonitorInfo(ctypes.sizeof(MonitorInfo))
-            if monitor and ctypes.windll.user32.GetMonitorInfoW(monitor, ctypes.byref(monitor_info)):
-                rect = monitor_info.rcWork
-                return (rect.left + max(0, (rect.right - rect.left - width) // 2),
-                        rect.top + max(0, (rect.bottom - rect.top - height) // 2))
-
-        # Fallback seguro: Tk conoce el área virtual o, al menos, la pantalla actual.
-        screen_width = root.winfo_screenwidth()
-        screen_height = root.winfo_screenheight()
-        return (pointer_x - width // 2, pointer_y - height // 2)
-    except Exception:
-        screen_width = root.winfo_screenwidth()
-        screen_height = root.winfo_screenheight()
-        return ((screen_width - width) // 2, (screen_height - height) // 2)
-
 # Verificar e instalar dependencias necesarias
 def ensure_gui_dependencies():
     # Primero instalamos dependencias que podemos manejar con pip
@@ -618,32 +559,28 @@ class GuiConfig:
         """Define los colores para modo claro y oscuro"""
         self.themes = {
             'light': {
-                'bg': '#f4f7fb',
-                'fg': '#172033',
-                'muted_fg': '#607089',
-                'console_bg': '#101827',
-                'console_fg': '#d7e2f0',
-                'button_bg': '#0b6e99',
+                'bg': '#f0f0f0',
+                'fg': 'black',
+                'console_bg': '#fafafa',
+                'console_fg': 'black',
+                'button_bg': '#007AFF',  # Azul estilo App Store
                 'button_fg': 'white',
-                'status_bg': '#e8eef5',
-                'frame_bg': '#ffffff',
-                'scrollbar_bg': '#a8b8ca',
-                'scrollbar_trough': '#dce5ef',
-                'border': '#d5dfeb',
+                'status_bg': '#e0e0e0',
+                'frame_bg': '#f0f0f0',
+                'scrollbar_bg': '#c0c0c0',  # Gris claro para scrollbars
+                'scrollbar_trough': '#e8e8e8',
             },
             'dark': {
-                'bg': '#111827',
-                'fg': '#edf3fa',
-                'muted_fg': '#9badc2',
-                'console_bg': '#0b1220',
-                'console_fg': '#d7e2f0',
-                'button_bg': '#1595c5',
+                'bg': '#2b2b2b',
+                'fg': '#e0e0e0',
+                'console_bg': '#1e1e1e',
+                'console_fg': '#e0e0e0',
+                'button_bg': '#007AFF',  # Azul estilo App Store
                 'button_fg': 'white',
-                'status_bg': '#0b1220',
-                'frame_bg': '#1d2939',
-                'scrollbar_bg': '#50657b',
-                'scrollbar_trough': '#172233',
-                'border': '#34465d',
+                'status_bg': '#1e1e1e',
+                'frame_bg': '#2b2b2b',
+                'scrollbar_bg': '#3a3a3a',  # Gris oscuro para scrollbars
+                'scrollbar_trough': '#2b2b2b',
             }
         }
     
@@ -671,8 +608,6 @@ class GuiConfig:
             for child in self.header_frame.winfo_children():
                 if isinstance(child, tk.Label):
                     child.configure(bg=theme['bg'], fg=theme['fg'])
-        if hasattr(self, 'header_subtitle'):
-            self.header_subtitle.configure(fg=theme['muted_fg'])
         
         # Actualizar logo_theme_frame y logo_label
         if hasattr(self, 'logo_theme_frame'):
@@ -694,9 +629,8 @@ class GuiConfig:
         
         # Actualizar botón de tema
         if hasattr(self, 'theme_btn'):
-            icon = 'Tema claro' if self.dark_mode else 'Tema oscuro'
-            self.theme_btn.configure(text=icon, bg=theme['button_bg'], fg=theme['button_fg'],
-                                     activebackground=theme['button_bg'], highlightbackground=theme['button_bg'])
+            icon = '🌙' if not self.dark_mode else '☀️'
+            self.theme_btn.configure(text=icon, bg=theme['button_bg'], fg=theme['button_fg'])
 
         # Actualizar botón de ajustes
         if hasattr(self, 'settings_btn'):
@@ -783,17 +717,14 @@ class GuiConfig:
 
     def build_ui(self):
         # Configurar estilos
-        self.header_font = ('Segoe UI', 17, 'bold') if os.name == 'nt' else ('Helvetica', 17, 'bold')
-        self.normal_font = ('Segoe UI', 10) if os.name == 'nt' else ('Helvetica', 10)
-        self.bold_font = ('Segoe UI', 11, 'bold') if os.name == 'nt' else ('Helvetica', 11, 'bold')
         style = ttk.Style()
         style.theme_use('clam')  # 'clam' suele permitir más personalización de colores
         
         # Estilo para la barra de progreso (más ancha y verde)
         style.configure("Green.Horizontal.TProgressbar",
-                        thickness=12,
-                        troughcolor='#dce5ef',
-                        background='#16866b',
+                        thickness=30,
+                        troughcolor='#E0E0E0',
+                        background='#4CAF50',
                         borderwidth=0)
         
         # Estilo para botones azules (App Store style)
@@ -803,44 +734,47 @@ class GuiConfig:
                        borderwidth=0,
                        focuscolor='none',
                        relief='flat',
-                       padding=(18, 9),
-                       font=self.bold_font)
+                       padding=(20, 10))
         style.map("Blue.TButton",
-                 background=[('active', '#075577'), ('pressed', '#075577'), ('disabled', '#9eacbb')],
-                 foreground=[('active', 'white'), ('pressed', 'white'), ('disabled', '#e7edf3')])
-        style.configure("Secondary.TButton", padding=(12, 6), font=self.normal_font)
-        style.configure("Modern.TNotebook.Tab", padding=(18, 9), font=self.bold_font)
+                 background=[('active', '#0051D5'), ('pressed', '#0051D5'), ('disabled', '#d0d0d0')],
+                 foreground=[('active', 'white'), ('pressed', 'white'), ('disabled', '#a0a0a0')])
         
         # Estilos para Treeview (tabla de resultados)
         # Estilo claro
         style.configure("Light.Treeview",
-                       background='#ffffff',
-                       foreground='#172033',
-                       fieldbackground='#ffffff',
+                       background='#fafafa',
+                       foreground='black',
+                       fieldbackground='#fafafa',
                        borderwidth=0)
         style.configure("Light.Treeview.Heading",
-                       background='#e8eef5',
-                       foreground='#172033',
+                       background='#e0e0e0',
+                       foreground='black',
                        relief='flat')
         style.map("Light.Treeview.Heading",
-                 background=[('active', '#d5e1ed')])
+                 background=[('active', '#d0d0d0')])
         
         # Estilo oscuro
         style.configure("Dark.Treeview",
-                       background='#101827',
-                       foreground='#d7e2f0',
-                       fieldbackground='#101827',
+                       background='#1e1e1e',
+                       foreground='#e0e0e0',
+                       fieldbackground='#1e1e1e',
                        borderwidth=0)
         style.configure("Dark.Treeview.Heading",
-                       background='#26364b',
-                       foreground='#edf3fa',
+                       background='#2b2b2b',
+                       foreground='#e0e0e0',
                        relief='flat')
         style.map("Dark.Treeview.Heading",
-                 background=[('active', '#344b65')])
+                 background=[('active', '#3a3a3a')])
         
         # Guardar referencia al estilo para poder cambiarlo después
         self.style = style
         
+        # Fuentes
+        # Fuentes (Aumentadas)
+        self.header_font = ('Segoe UI', 18, 'bold') if os.name == 'nt' else ('Helvetica', 18, 'bold')
+        self.normal_font = ('Segoe UI', 11) if os.name == 'nt' else ('Helvetica', 11)
+        self.bold_font = ('Segoe UI', 12, 'bold') if os.name == 'nt' else ('Helvetica', 12, 'bold')
+
         # --- Menú ---
         menubar = tk.Menu(self.root)
         filemenu = tk.Menu(menubar, tearoff=0)
@@ -855,16 +789,16 @@ class GuiConfig:
         self.root.config(menu=menubar)
 
         # --- Contenedor Principal ---
-        self.main_frame = tk.Frame(self.root, bg='#f4f7fb')
+        self.main_frame = tk.Frame(self.root, bg='#f0f0f0')
         self.main_frame.pack(fill='both', expand=True)
         self.root.configure(bg='#f0f0f0')
 
         # --- Header (Logo + Título) ---
-        self.header_frame = tk.Frame(self.main_frame, bg='#f4f7fb')
-        self.header_frame.pack(fill='x', pady=(18, 12), padx=26)
+        self.header_frame = tk.Frame(self.main_frame, bg='#f0f0f0')
+        self.header_frame.pack(fill='x', pady=(20, 10), padx=20)
 
         # Logo y botón de tema en la misma fila
-        self.logo_theme_frame = tk.Frame(self.header_frame, bg='#f4f7fb')
+        self.logo_theme_frame = tk.Frame(self.header_frame, bg='#f0f0f0')
         self.logo_theme_frame.pack(fill='x')
         
         # Logo (centrado)
@@ -881,50 +815,46 @@ class GuiConfig:
                     print(f"Error redondeando logo: {e}")
                 
                 logo_photo = ImageTk.PhotoImage(logo_image)
-                self.logo_label = tk.Label(self.logo_theme_frame, image=logo_photo, bg='#f4f7fb')
+                self.logo_label = tk.Label(self.logo_theme_frame, image=logo_photo, bg='#f0f0f0')
                 self.logo_label.image = logo_photo
                 self.logo_label.pack(side='top', pady=(0, 10))
             except Exception:
                 pass
         
         # Botón de tema (esquina superior derecha)
-        self.theme_btn = tk.Button(self.logo_theme_frame, text='Tema oscuro', font=self.normal_font,
-                                   command=self.toggle_theme, padx=10, pady=5,
-                                   bg='#0b6e99', fg='white', cursor='hand2',
+        self.theme_btn = tk.Button(self.logo_theme_frame, text='🌙', font=('Segoe UI', 16), 
+                                   command=self.toggle_theme, width=3, height=1,
+                                   bg='#007AFF', fg='white', cursor='hand2',
                                    relief='flat', borderwidth=0,
-                                    activebackground='#075577', activeforeground='white',
-                                    highlightbackground='#0b6e99', highlightcolor='#0b6e99')
+                                   activebackground='#0051D5', activeforeground='white',
+                                   highlightbackground='#007AFF', highlightcolor='#007AFF')
         self.theme_btn.place(relx=1.0, rely=0.0, anchor='ne')
 
         # Botón de ajustes (al lado del botón de tema)
-        self.settings_btn = tk.Button(self.logo_theme_frame, text='Ajustes', font=self.normal_font,
-                                   command=self.open_settings, padx=10, pady=5,
-                                   bg='#0b6e99', fg='white', cursor='hand2',
+        self.settings_btn = tk.Button(self.logo_theme_frame, text='⚙️', font=('Segoe UI', 16), 
+                                   command=self.open_settings, width=3, height=1,
+                                   bg='#007AFF', fg='white', cursor='hand2',
                                    relief='flat', borderwidth=0,
-                                    activebackground='#075577', activeforeground='white',
-                                    highlightbackground='#0b6e99', highlightcolor='#0b6e99')
-        self.settings_btn.place(relx=1.0, rely=0.0, x=-112, anchor='ne')
+                                   activebackground='#0051D5', activeforeground='white',
+                                   highlightbackground='#007AFF', highlightcolor='#007AFF')
+        self.settings_btn.place(relx=1.0, rely=0.0, x=-50, anchor='ne')
 
         # Título
-        title = tk.Label(self.header_frame, text='Configurador de antenas',
-                        font=self.header_font, bg='#f4f7fb', fg='#172033')
+        title = tk.Label(self.header_frame, text='CONFIGURADOR DE ANTENAS UBIQUITI SIIP INTERNET', 
+                        font=self.header_font, bg='#f0f0f0', fg='#333333')
         title.pack(side='top')
-        self.header_subtitle = tk.Label(self.header_frame,
-                                        text='Operación, actualización y diagnóstico de equipos Ubiquiti',
-                                        font=self.normal_font, bg='#f4f7fb', fg='#607089')
-        self.header_subtitle.pack(side='top', pady=(3, 0))
 
         # --- Notebook (Pestañas) ---
-        self.notebook = ttk.Notebook(self.main_frame, style='Modern.TNotebook')
-        self.notebook.pack(fill='both', expand=True, padx=26, pady=(0, 12))
+        self.notebook = ttk.Notebook(self.main_frame)
+        self.notebook.pack(fill='both', expand=True, padx=20, pady=(0, 10))
         
         # --- Pestaña 1: Proceso ---
-        self.tab_proceso = tk.Frame(self.notebook, bg='#f4f7fb')
+        self.tab_proceso = tk.Frame(self.notebook, bg='#f0f0f0')
         self.notebook.add(self.tab_proceso, text='  Proceso  ')
         
         # --- Área de Control (Botón + Progreso) ---
-        self.control_frame = tk.LabelFrame(self.tab_proceso, text="Control de proceso", font=self.bold_font, bg='#ffffff', fg='#172033', padx=18, pady=16)
-        self.control_frame.pack(fill='x', padx=20, pady=(12, 8))
+        self.control_frame = tk.LabelFrame(self.tab_proceso, text="Control de Proceso", font=self.bold_font, bg='#f0f0f0', fg='black', padx=15, pady=15)
+        self.control_frame.pack(fill='x', padx=20, pady=10)
 
         # Contenedor para centrar el botón
         self.btn_container = tk.Frame(self.control_frame, bg='#f0f0f0')
@@ -942,8 +872,8 @@ class GuiConfig:
         self.progress.pack(fill='x')
 
         # --- Área de Estado Visual (Iconos) ---
-        self.antennas_frame = tk.LabelFrame(self.tab_proceso, text="Estado de antenas", font=self.bold_font, bg='#ffffff', fg='#172033', padx=15, pady=14)
-        self.antennas_frame.pack(fill='x', padx=20, pady=8)
+        self.antennas_frame = tk.LabelFrame(self.tab_proceso, text="Estado de Antenas", font=self.bold_font, bg='#f0f0f0', fg='black', padx=15, pady=15)
+        self.antennas_frame.pack(fill='x', padx=20, pady=10)
         
         # Contenedor interno para centrar los iconos
         self.icons_container = tk.Frame(self.antennas_frame, bg='#f0f0f0')
@@ -968,21 +898,21 @@ class GuiConfig:
 
         # --- Consola y Logs ---
         # --- Consola y Logs ---
-        self.log_frame = tk.LabelFrame(self.tab_proceso, text="Registro de actividad", font=self.bold_font, bg='#ffffff', fg='#172033', padx=12, pady=12)
+        self.log_frame = tk.LabelFrame(self.tab_proceso, text="Registro de Actividad", font=self.bold_font, bg='#f0f0f0', fg='black', padx=10, pady=10)
         self.log_frame.pack(fill='both', expand=True, padx=20, pady=(0, 10))
 
         # Toolbar para el log
         self.log_tools_frame = tk.Frame(self.log_frame, bg='#f0f0f0')
         self.log_tools_frame.pack(fill='x', pady=(0, 5))
-        self.copy_log_btn = ttk.Button(self.log_tools_frame, text='Copiar registro', style='Secondary.TButton', command=self.copy_console_log)
+        self.copy_log_btn = ttk.Button(self.log_tools_frame, text='Copiar Log', command=self.copy_console_log)
         self.copy_log_btn.pack(side='right')
 
-        self.console = ScrolledText(self.log_frame, height=10, wrap='word', font=('Consolas', 9), bg='#101827', fg='#d7e2f0', relief='flat', borderwidth=0, padx=10, pady=8)
+        self.console = ScrolledText(self.log_frame, height=10, wrap='word', font=('Consolas', 9), bg='#fafafa', fg='black')
         self.console.pack(fill='both', expand=True)
         self.console.configure(state='disabled')
 
         # --- Pestaña 2: Resultados ---
-        self.tab_resultados = tk.Frame(self.notebook, bg='#f4f7fb')
+        self.tab_resultados = tk.Frame(self.notebook, bg='#f0f0f0')
         self.notebook.add(self.tab_resultados, text='  Resultados  ')
         
         # Frame para resultados
@@ -993,10 +923,10 @@ class GuiConfig:
         header_frame = tk.Frame(results_container, bg='#f0f0f0')
         header_frame.pack(fill='x', pady=(0, 10))
         
-        tk.Label(header_frame, text='Resultados del proceso', font=self.bold_font, bg='#f4f7fb', fg='#172033').pack(side='left')
-        self.copy_mac_btn = ttk.Button(header_frame, text='Copiar MACs', style='Secondary.TButton', command=self.copy_macs_to_clipboard, state='disabled')
+        tk.Label(header_frame, text='Resultados del Proceso', font=self.bold_font, bg='#f0f0f0', fg='black').pack(side='left')
+        self.copy_mac_btn = ttk.Button(header_frame, text='Copiar MACs', command=self.copy_macs_to_clipboard, state='disabled')
         self.copy_mac_btn.pack(side='right')
-        self.open_ips_btn = ttk.Button(header_frame, text='Abrir IPs exitosas', style='Secondary.TButton', command=self.open_successful_ips)
+        self.open_ips_btn = ttk.Button(header_frame, text='Abrir IPs Exitosas 🌐', command=self.open_successful_ips)
         
         # Tabla de resultados con Treeview
         table_frame = tk.Frame(results_container, bg='#f0f0f0')
@@ -1026,14 +956,14 @@ class GuiConfig:
         scrollbar.pack(side='right', fill='y')
 
         # --- Barra de Estado Inferior ---
-        self.status_bar = tk.Frame(self.root, bg='#e8eef5', height=30)
+        self.status_bar = tk.Frame(self.root, bg='#e0e0e0', height=25)
         self.status_bar.pack(side='bottom', fill='x')
         
-        status = tk.Label(self.status_bar, textvariable=self.status_var, bg='#e8eef5', fg='#607089', font=self.normal_font, anchor='w', padx=14)
+        status = tk.Label(self.status_bar, textvariable=self.status_var, bg='#e0e0e0', font=('Segoe UI', 9), anchor='w', padx=10)
         status.pack(side='left')
 
         # Botón de Test de Conexión (Ping Scan)
-        self.test_conn_btn = ttk.Button(self.status_bar, text='Test de conexión',
+        self.test_conn_btn = ttk.Button(self.status_bar, text='Test de Conexión', 
                                        style='Blue.TButton', command=self.run_connectivity_test, cursor='hand2')
         self.test_conn_btn.pack(side='right', padx=10, pady=2)
 
@@ -1784,10 +1714,13 @@ class GuiConfig:
 if __name__ == '__main__':
     root = tk.Tk()
     root.title('Configurador de antenas SIIP INTERNET')
-    w, h = 980, 800
+    w, h = 900, 800
     root.geometry(f'{w}x{h}')
     root.update_idletasks()
-    x, y = pointer_monitor_geometry(root, w, h)
+    ws = root.winfo_screenwidth()
+    hs = root.winfo_screenheight()
+    x = (ws // 2) - (w // 2)
+    y = (hs // 2) - (h // 2)
     root.geometry(f'{w}x{h}+{x}+{y}')
     try:
         icon_path = resource_path('icono.png')
