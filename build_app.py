@@ -17,7 +17,7 @@ def build():
     # 2. Definir archivos y recursos
     main_script = "gui_configurador.py"
     backend_script = "configuracion_completa_antenas2.py"
-    assets = ["logo.png", "antena.png", "icono.png"]
+    assets = ["app_manifest.json", "logo.png", "antena.png", "icono.png"]
     
     # 3. Construir comando de PyInstaller
     # --noconsole: No mostrar terminal negra (Windows)

@@ -126,8 +126,24 @@ def resource_path(relative_path):
         # PyInstaller crea una carpeta temporal y guarda la ruta en _MEIPASS
         base_path = sys._MEIPASS
     except Exception:
-        base_path = os.path.abspath(".")
+        base_path = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_path, relative_path)
+
+def load_app_manifest():
+    """Lee los metadatos de la aplicación desde el manifiesto empaquetado."""
+    manifest_path = resource_path('app_manifest.json')
+    try:
+        with open(manifest_path, encoding='utf-8') as manifest_file:
+            return json.load(manifest_file)
+    except (OSError, json.JSONDecodeError):
+        return {
+            'name': 'Configurador de Antenas SIIP INTERNET',
+            'version': 'desconocida',
+            'author': 'Daniel Humberto Soto Villegas',
+            'company': 'SIIP INTERNET',
+        }
+
+APP_MANIFEST = load_app_manifest()
 
 class QueueRedirector:
     """ Redirecciona stdout a una cola para que la GUI la procese """
@@ -1164,7 +1180,13 @@ class GuiConfig:
             var.set(path)
 
     def about(self):
-        messagebox.showinfo('Acerca de', 'Autor: Daniel Humberto Soto Villegas (2025)\nEmpresa: SIIP INTERNET')
+        messagebox.showinfo(
+            'Acerca de',
+            f"{APP_MANIFEST['name']}\n"
+            f"Versión: {APP_MANIFEST['version']}\n"
+            f"Autor: {APP_MANIFEST['author']}\n"
+            f"Empresa: {APP_MANIFEST['company']}"
+        )
 
     def on_exit(self):
         if self.running:

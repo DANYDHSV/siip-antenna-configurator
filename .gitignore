@@ -1,10 +1,23 @@
-/build
-/dist
-/respaldo carpeta config de antenas
+# Entorno y archivos del sistema
+.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+
+# Artefactos de empaquetado
+/build/
+/dist/
+*.spec
+
+# Datos y archivos operativos locales
 resultados_antenas.csv
-prioridad_wifi.sh
-configfurar_red.sh
-restaurar_red.sh
-*__pycache__
-*spec
-respaldo carpeta config de antenas/
+crash_log.txt
+gui_log.txt
+*.cfg
+*.bin
+*.sh
+/respaldo carpeta config de antenas/
+
+# La plantilla sanitizada sí forma parte del repositorio
+!examples/
+!examples/WA-example.cfg

@@ -2,12 +2,18 @@
 
 Todos los cambios notables en este proyecto serán documentados en este archivo.
 
+## [Unreleased]
+### 🛠 Mejoras
+- Se centralizó la versión de la aplicación en `app_manifest.json` y ahora se muestra en la ventana "Acerca de".
+- Se añadió una plantilla sanitizada de configuración en `examples/WA-example.cfg`.
+- Se reforzó el `.gitignore` para evitar publicar backups, firmware y datos operativos locales.
+
 ## [1.5.0] - 2026-06-06
 ### 🌟 Nuevas Funcionalidades
 - **Validación Automatizada con Selenium y Auto-Login**: El botón "Abrir IPs Exitosas" ahora ejecuta una instancia controlada de Google Chrome con Selenium. 
   - Abre todas las IPs exitosas de la ejecución en pestañas de una única ventana.
   - Ignora errores de seguridad y certificados auto-firmados SSL (HTTP/HTTPS).
-  - Automáticamente rellena las credenciales de administración (`ubnt` / `Siip.567`) e inicia sesión en cada una de ellas por separado.
+   - Automáticamente utiliza las credenciales administrativas predeterminadas del procedimiento de instalación para iniciar sesión en cada antena.
   - Mantiene las pestañas abiertas y el navegador acoplado/activo (utilizando la opción experimental `detach`), permitiendo a los técnicos tomar control inmediato del panel de control de las antenas sin reintroducir credenciales.
   - Se ejecuta en segundo plano para no congelar la interfaz gráfica de la aplicación.
 
@@ -29,7 +35,7 @@ Todos los cambios notables en este proyecto serán documentados en este archivo.
 ## [1.2.0] - 2026-03-21
 ### 🌟 Nuevas Funcionalidades
 - **Actualizador de Firmware Automático (OTA)**: La aplicación verifica transparentemente contra la API de Ubiquiti (`fw-update.ubnt.com`) si existe un parche más nuevo para la base estática `WA`. De existir, ofrece descargarla, mostrándote una ventana de progreso y actualizando las configuraciones centrales automáticamente.
-- **Bypass de Políticas de Seguridad v19+**: Las antenas con firmware de fábrica en revisiones v19 y superior exigen obligatoriamente 12 caracteres. El configurador intercepta la validación e inyecta temporalmente `Siip.123456789` para abrir puertas SSH durante la Fase 1 sin sacrificar la restauración del backup, previniendo cuellos de botella de downgrade.
+- **Bypass de Políticas de Seguridad v19+**: Las antenas con firmware de fábrica en revisiones v19 y superior exigen obligatoriamente 12 caracteres. El configurador aplica temporalmente la credencial definida por el procedimiento de instalación para abrir SSH durante la Fase 1 sin sacrificar la restauración del backup, previniendo cuellos de botella de downgrade.
 - **Botón Rápido de Ajustes**: Se incluye un icono de Engrane (`⚙️`) directamente en el header de la aplicación para saltar rápidamente a la manipulación de IPs y recursos locales, complementando al botón Dark/Light mode.
 
 ### 🛠 Mejoras y Correcciones (Bug Fixes)
