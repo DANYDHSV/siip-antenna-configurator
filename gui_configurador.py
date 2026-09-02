@@ -577,28 +577,29 @@ class GuiConfig:
         """Define los colores para modo claro y oscuro"""
         self.themes = {
             'light': {
-                'bg': '#f5f7fa',
-                'fg': '#1f2937',
-                'console_bg': '#111827',
-                'console_fg': '#e5edf5',
-                'button_bg': '#0f6680',
+                'bg': '#f4f6f8',
+                'fg': '#1f2933',
+                'console_bg': '#17202a',
+                'console_fg': '#e6edf3',
+                'button_bg': '#145da0',
                 'button_fg': 'white',
-                'status_bg': '#e8eef3',
+                'status_bg': '#e8edf2',
                 'frame_bg': '#ffffff',
-                'scrollbar_bg': '#a8bac8',
-                'scrollbar_trough': '#dce5eb',
+                'scrollbar_bg': '#aab7c4',
+                'scrollbar_trough': '#dfe5eb',
             },
             'dark': {
-                'bg': '#111827',
-                'fg': '#e5edf5',
-                'console_bg': '#0b1220',
-                'console_fg': '#d8e4ef',
-                'button_bg': '#168aad',
+                'bg': '#121a24',
+                'fg': '#e6edf3',
+                'console_bg': '#0d141c',
+                'console_fg': '#d9e2ec',
+                # Azul más profundo para conservar contraste con texto blanco.
+                'button_bg': '#1f78b4',
                 'button_fg': 'white',
-                'status_bg': '#0b1220',
-                'frame_bg': '#1f2a3a',
-                'scrollbar_bg': '#526b80',
-                'scrollbar_trough': '#172334',
+                'status_bg': '#0d141c',
+                'frame_bg': '#1c2936',
+                'scrollbar_bg': '#526a7e',
+                'scrollbar_trough': '#17232f',
             }
         }
     
@@ -612,6 +613,20 @@ class GuiConfig:
     def apply_theme(self):
         """Aplica el tema actual a todos los widgets"""
         theme = self.themes['dark'] if self.dark_mode else self.themes['light']
+
+        # Mantener los estilos ttk sincronizados con la paleta activa.
+        if hasattr(self, 'style'):
+            self.style.configure('Blue.TButton', background=theme['button_bg'])
+            self.style.map('Blue.TButton', background=[
+                ('active', theme['button_bg']),
+                ('pressed', theme['button_bg']),
+                ('disabled', theme['scrollbar_bg']),
+            ])
+            self.style.configure(
+                'Green.Horizontal.TProgressbar',
+                troughcolor=theme['scrollbar_trough'],
+                background='#56d364' if self.dark_mode else '#238636',
+            )
         
         # Actualizar root
         self.root.configure(bg=theme['bg'])
@@ -740,48 +755,48 @@ class GuiConfig:
         # Estilo para la barra de progreso (más ancha y verde)
         style.configure("Green.Horizontal.TProgressbar",
                         thickness=30,
-                        troughcolor='#dce5eb',
-                        background='#16866b',
+                        troughcolor='#dfe5eb',
+                        background='#238636',
                         borderwidth=0)
         
         # Estilo para botones azules (App Store style)
         style.configure("Blue.TButton",
-                       background='#0f6680',
+                       background='#145da0',
                        foreground='white',
                        borderwidth=0,
                        focuscolor='none',
                        relief='flat',
                        padding=(20, 10))
         style.map("Blue.TButton",
-                 background=[('active', '#0a4f63'), ('pressed', '#0a4f63'), ('disabled', '#aab8c2')],
+                 background=[('active', '#0f477a'), ('pressed', '#0f477a'), ('disabled', '#aab8c2')],
                  foreground=[('active', 'white'), ('pressed', 'white'), ('disabled', '#edf2f5')])
         
         # Estilos para Treeview (tabla de resultados)
         # Estilo claro
         style.configure("Light.Treeview",
                        background='#ffffff',
-                       foreground='#1f2937',
+                       foreground='#1f2933',
                        fieldbackground='#ffffff',
                        borderwidth=0)
         style.configure("Light.Treeview.Heading",
-                       background='#e8eef3',
-                       foreground='#1f2937',
+                       background='#e8edf2',
+                       foreground='#1f2933',
                        relief='flat')
         style.map("Light.Treeview.Heading",
-                 background=[('active', '#d2e1e8')])
+                 background=[('active', '#d3e0eb')])
         
         # Estilo oscuro
         style.configure("Dark.Treeview",
-                       background='#0b1220',
-                       foreground='#d8e4ef',
-                       fieldbackground='#0b1220',
+                       background='#0d141c',
+                       foreground='#d9e2ec',
+                       fieldbackground='#0d141c',
                        borderwidth=0)
         style.configure("Dark.Treeview.Heading",
-                       background='#26384a',
-                       foreground='#e5edf5',
+                       background='#263847',
+                       foreground='#e6edf3',
                        relief='flat')
         style.map("Dark.Treeview.Heading",
-                 background=[('active', '#34536a')])
+                 background=[('active', '#34536b')])
         
         # Guardar referencia al estilo para poder cambiarlo después
         self.style = style
