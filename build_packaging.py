@@ -61,6 +61,8 @@ def build_mac():
     # ditto --norsrc prevents Finder metadata from entering the distributable DMG.
     run(['ditto', '--norsrc', str(app_path), str(staging_app)])
     clear_macos_metadata(staging_app)
+    applications_link = staging_dir / 'Applications'
+    applications_link.symlink_to('/Applications')
     if dmg_path.exists():
         dmg_path.unlink()
     run(['hdiutil', 'create', '-volname', 'Configurador Antenas',
