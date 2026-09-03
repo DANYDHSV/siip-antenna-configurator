@@ -14,13 +14,6 @@ def build():
         print("📦 Instalando PyInstaller...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller"])
 
-    try:
-        import ttkbootstrap
-        print("✅ ttkbootstrap detectado.")
-    except ImportError:
-        print("📦 Instalando ttkbootstrap...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "ttkbootstrap"])
-
     # 2. Definir archivos y recursos
     main_script = "gui_configurador.py"
     backend_script = "configuracion_completa_antenas2.py"

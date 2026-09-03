@@ -14,7 +14,6 @@ def ensure_gui_dependencies():
     # Primero instalamos dependencias que podemos manejar con pip
     packages = {
         'PIL': 'pillow',  # Para manejo de imágenes
-        'ttkbootstrap': 'ttkbootstrap',  # Temas modernos para ttk
     }
     
     for import_name, pip_name in packages.items():
@@ -110,7 +109,7 @@ import webbrowser
 
 # Para la GUI
 import tkinter as tk
-import ttkbootstrap as ttk
+from tkinter import ttk
 from tkinter import messagebox, filedialog
 from tkinter.scrolledtext import ScrolledText
 from PIL import Image, ImageTk, ImageDraw, ImageChops
@@ -613,20 +612,6 @@ class GuiConfig:
         """Aplica el tema actual a todos los widgets"""
         theme = self.themes['dark'] if self.dark_mode else self.themes['light']
 
-        # Mantener los estilos ttk sincronizados con la paleta activa.
-        if hasattr(self, 'style'):
-            self.style.configure('Blue.TButton', background=theme['button_bg'])
-            self.style.map('Blue.TButton', background=[
-                ('active', theme['button_bg']),
-                ('pressed', theme['button_bg']),
-                ('disabled', theme['scrollbar_bg']),
-            ])
-            self.style.configure(
-                'Green.Horizontal.TProgressbar',
-                troughcolor=theme['scrollbar_trough'],
-                background='#4CAF50',
-            )
-        
         # Actualizar root
         self.root.configure(bg=theme['bg'])
         
@@ -750,6 +735,7 @@ class GuiConfig:
     def build_ui(self):
         # Configurar estilos
         style = ttk.Style()
+        style.theme_use('clam')
         
         # Estilo para la barra de progreso (más ancha y verde)
         style.configure("Green.Horizontal.TProgressbar",
@@ -892,13 +878,13 @@ class GuiConfig:
         self.btn_container.pack(fill='x', pady=(0, 15))
         
         self.start_btn = ttk.Button(self.btn_container, text='Iniciar proceso de configuración',
-                                   bootstyle='primary',
+                                   style='Blue.TButton',
                                    command=self.toggle_process, cursor='hand2')
         self.start_btn.pack(anchor='center', pady=10)
 
         # Progress bar customizada
         self.progress = ttk.Progressbar(self.control_frame, orient='horizontal', mode='determinate',
-                                        bootstyle='success', style="Green.Horizontal.TProgressbar")
+                                        style="Green.Horizontal.TProgressbar")
         self.progress['maximum'] = self.total_antennas
         self.progress['value'] = 0
         self.progress.pack(fill='x')
@@ -936,7 +922,7 @@ class GuiConfig:
         # Toolbar para el log
         self.log_tools_frame = tk.Frame(self.log_frame, bg='#f0f0f0')
         self.log_tools_frame.pack(fill='x', pady=(0, 5))
-        self.copy_log_btn = ttk.Button(self.log_tools_frame, text='Copiar Log', bootstyle='secondary', command=self.copy_console_log)
+        self.copy_log_btn = ttk.Button(self.log_tools_frame, text='Copiar Log', command=self.copy_console_log)
         self.copy_log_btn.pack(side='right')
 
         self.console = ScrolledText(self.log_frame, height=10, wrap='word', font=('Consolas', 9), bg='#fafafa', fg='black')
@@ -956,9 +942,9 @@ class GuiConfig:
         header_frame.pack(fill='x', pady=(0, 10))
         
         tk.Label(header_frame, text='Resultados del Proceso', font=self.bold_font, bg='#f0f0f0', fg='black').pack(side='left')
-        self.copy_mac_btn = ttk.Button(header_frame, text='Copiar MACs', bootstyle='secondary', command=self.copy_macs_to_clipboard, state='disabled')
+        self.copy_mac_btn = ttk.Button(header_frame, text='Copiar MACs', command=self.copy_macs_to_clipboard, state='disabled')
         self.copy_mac_btn.pack(side='right')
-        self.open_ips_btn = ttk.Button(header_frame, text='Abrir IPs Exitosas', bootstyle='secondary', command=self.open_successful_ips)
+        self.open_ips_btn = ttk.Button(header_frame, text='Abrir IPs Exitosas', command=self.open_successful_ips)
         
         # Tabla de resultados con Treeview
         table_frame = tk.Frame(results_container, bg='#f0f0f0')
@@ -996,7 +982,7 @@ class GuiConfig:
 
         # Botón de Test de Conexión (Ping Scan)
         self.test_conn_btn = ttk.Button(self.status_bar, text='Test de Conexión',
-                                       bootstyle='primary', command=self.run_connectivity_test, cursor='hand2')
+                                       style='Blue.TButton', command=self.run_connectivity_test, cursor='hand2')
         self.test_conn_btn.pack(side='right', padx=10, pady=2)
 
     def init_antenna_icons(self):
@@ -1750,7 +1736,7 @@ class GuiConfig:
 
             
 if __name__ == '__main__':
-    root = ttk.Window(themename='flatly')
+    root = tk.Tk()
     root.title('Configurador de antenas SIIP INTERNET')
     w, h = 900, 800
     root.geometry(f'{w}x{h}')
