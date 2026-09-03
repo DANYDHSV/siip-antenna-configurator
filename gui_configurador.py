@@ -750,8 +750,6 @@ class GuiConfig:
     def build_ui(self):
         # Configurar estilos
         style = ttk.Style()
-        # Conservar el renderizado base original y aplicar encima nuestros estilos.
-        style.theme_use('clam')
         
         # Estilo para la barra de progreso (más ancha y verde)
         style.configure("Green.Horizontal.TProgressbar",
