@@ -531,6 +531,10 @@ class GuiConfig:
         
         status_lbl = ttk.Label(dl_window, text="Iniciando...")
         status_lbl.pack()
+
+        firmware_dir = os.path.join(os.path.dirname(app_data_path('firmware')), 'firmware')
+        os.makedirs(firmware_dir, exist_ok=True)
+        download_path = os.path.join(firmware_dir, os.path.basename(filename))
         
         def reporthook(count, block_size, total_size):
             if total_size > 0:
@@ -553,7 +557,7 @@ class GuiConfig:
                 # Para urlretrieve con un opener personalizado, hay una forma:
                 try:
                     urllib.request.install_opener(opener)
-                    urllib.request.urlretrieve(url, filename, reporthook=reporthook)
+                    urllib.request.urlretrieve(url, download_path, reporthook=reporthook)
                 finally:
                     # Restaurar el opener por defecto inmediatamente para no afectar a esperar_web del backend
                     urllib.request.install_opener(urllib.request.build_opener())
@@ -562,7 +566,7 @@ class GuiConfig:
                 self.root.after(0, dl_window.destroy)
                 
                 # Actualizar configuración
-                self.settings['archivo_firmware'] = filename
+                self.settings['archivo_firmware'] = download_path
                 self.save_settings()
                 
                 self.root.after(0, lambda: messagebox.showinfo("Descarga Completada", f"Firmware actualizado a {filename}. Por favor reinicia o revisa los ajustes.", parent=self.root))
