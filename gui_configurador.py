@@ -130,6 +130,20 @@ def resource_path(relative_path):
         base_path = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_path, relative_path)
 
+
+def app_data_path(filename):
+    """Devuelve una ruta escribible para datos creados por la aplicación."""
+    if not getattr(sys, 'frozen', False):
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    elif sys.platform == 'darwin':
+        base_path = os.path.join(os.path.expanduser('~/Library/Application Support'), 'ConfiguradorAntenas')
+    elif os.name == 'nt':
+        base_path = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'ConfiguradorAntenas')
+    else:
+        base_path = os.path.join(os.path.expanduser('~/.config'), 'ConfiguradorAntenas')
+    os.makedirs(base_path, exist_ok=True)
+    return os.path.join(base_path, filename)
+
 def load_app_manifest():
     """Lee los metadatos de la aplicación desde el manifiesto empaquetado."""
     manifest_path = resource_path('app_manifest.json')
@@ -168,7 +182,9 @@ def redirect_stdout_to_queue(queue):
 # Importar el backend para ejecución directa (mejor para el empaquetado)
 import configuracion_completa_antenas2
 
-SETTINGS_FILE = 'gui_settings.json'
+SETTINGS_FILE = app_data_path('gui_settings.json')
+RESULTS_FILE = app_data_path('resultados_antenas.csv')
+CRASH_LOG_FILE = app_data_path('crash_log.txt')
 DEFAULT_SETTINGS = {
     'archivo_firmware': os.environ.get('ARCHIVO_LOCAL_FW', 'WA.v8.7.19.48279.250811.0636.bin'),
     'backup_cfg': os.environ.get('BACKUP_CFG', 'WA-28704EB63776.cfg'),
@@ -205,7 +221,7 @@ class GuiConfig:
     def load_results_from_csv(self):
         """Carga los resultados desde el archivo CSV y los muestra en la tabla"""
         import csv
-        csv_path = os.path.join(os.getcwd(), 'resultados_antenas.csv')
+        csv_path = RESULTS_FILE
         
         # Limpiar tabla existente
         for item in self.results_tree.get_children():
@@ -1243,7 +1259,7 @@ class GuiConfig:
             return ip_final
             
         # 2. Buscar en el CSV la fila correspondiente
-        csv_path = os.path.join(os.getcwd(), 'resultados_antenas.csv')
+        csv_path = RESULTS_FILE
         if os.path.exists(csv_path):
             try:
                 import csv
@@ -1420,7 +1436,7 @@ class GuiConfig:
         self.retry_ips = []
         
         # Borrar resultados previos para iniciar limpio
-        csv_path = os.path.join(os.getcwd(), 'resultados_antenas.csv')
+        csv_path = RESULTS_FILE
         if os.path.exists(csv_path):
             try:
                 os.remove(csv_path)
@@ -1480,6 +1496,7 @@ class GuiConfig:
             
         os.environ['RANGE_START'] = str(r_start)
         os.environ['RANGE_END'] = str(r_end)
+        os.environ['RESULTADOS_CSV'] = RESULTS_FILE
         os.environ['PYTHONUNBUFFERED'] = '1'
 
         if not is_retry_run:
@@ -1497,6 +1514,7 @@ class GuiConfig:
                     range_end=r_end,
                     backup_cfg=os.environ['BACKUP_CFG'],
                     archivo_local_fw=os.environ['ARCHIVO_LOCAL_FW'],
+                    csv_file=RESULTS_FILE,
                     target_ips=retry_ips if is_retry_run else None
                 )
         except KeyboardInterrupt:
@@ -1506,7 +1524,7 @@ class GuiConfig:
         except Exception as e:
             self.queue.put(('error', f'Error en la ejecución del backend: {e}'))
             import traceback
-            with open('crash_log.txt', 'w') as f:
+            with open(CRASH_LOG_FILE, 'w', encoding='utf-8') as f:
                 f.write(traceback.format_exc())
             print(traceback.format_exc())
             self.queue.put(('finished', None))
@@ -1516,7 +1534,7 @@ class GuiConfig:
         # Ya que ahora compartimos memoria, podríamos obtenerlas más directo, 
         # pero para mantener compatibilidad leemos el CSV generado.
         try:
-            csv_path = 'resultados_antenas.csv'
+            csv_path = RESULTS_FILE
             if os.path.exists(csv_path):
                 with open(csv_path, 'r', encoding='utf-8') as f:
                     reader = csv.DictReader(f)
@@ -1559,7 +1577,7 @@ class GuiConfig:
                 except Exception:
                     pass
         # After cancel, try to show partial summary if CSV exists
-        csv_path = os.path.join(os.getcwd(), 'resultados_antenas.csv')
+        csv_path = RESULTS_FILE
         if os.path.exists(csv_path):
             try:
                 with open(csv_path, 'r', encoding='utf-8') as f:
@@ -1603,7 +1621,7 @@ class GuiConfig:
                 self.notebook.select(self.tab_resultados)
 
     def show_final_csv_summary(self):
-        csv_path = os.path.join(os.getcwd(), 'resultados_antenas.csv')
+        csv_path = RESULTS_FILE
         if os.path.exists(csv_path):
             try:
                 with open(csv_path, 'r', encoding='utf-8') as f:
@@ -1616,7 +1634,7 @@ class GuiConfig:
     def get_failed_antennas(self):
         """Lee el CSV y regresa la lista de ip_final para las antenas que fallaron"""
         import csv
-        csv_path = os.path.join(os.getcwd(), 'resultados_antenas.csv')
+        csv_path = RESULTS_FILE
         if not os.path.exists(csv_path):
             return []
             

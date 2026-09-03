@@ -8,6 +8,8 @@ __pycache__/
 /build/
 /dist/
 *.spec
+!ConfiguradorAntenas-mac.spec
+!ConfiguradorAntenas-win.spec
 
 # Datos y archivos operativos locales
 resultados_antenas.csv

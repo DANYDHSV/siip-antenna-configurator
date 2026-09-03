@@ -72,6 +72,36 @@ El programa instala durante el arranque las dependencias Python que puede gestio
    - Verifica las rutas de los archivos en "Archivo" > "Ajustes".
    - Presiona **"Iniciar proceso"**.
 
+## 📦 Empaquetado
+
+El empaquetado debe ejecutarse en el sistema y arquitectura de destino. PyInstaller no genera un ejecutable Windows fiable desde macOS.
+
+### macOS
+
+En un Mac Apple Silicon:
+
+```bash
+python3 -m pip install pyinstaller pillow paramiko selenium webdriver-manager
+python3 build_packaging.py mac
+```
+
+Esto genera `dist/ConfiguradorAntenas-macOS-arm64.dmg`. Al abrirlo, arrastra `ConfiguradorAntenas.app` a `Aplicaciones`; después estará disponible desde Launchpad y Spotlight.
+
+En un Mac Intel se ejecuta el mismo comando y genera `dist/ConfiguradorAntenas-macOS-x86_64.dmg`.
+
+### Windows
+
+En Windows PowerShell:
+
+```powershell
+py -m pip install pyinstaller pillow paramiko selenium webdriver-manager
+py build_packaging.py windows
+```
+
+El ejecutable se genera en `dist\ConfiguradorAntenas.exe`.
+
+Los recursos gráficos se incluyen explícitamente en ambos bundles. La configuración, los resultados y los logs se guardan en la carpeta de datos del usuario para que la aplicación funcione también al abrirse desde Finder, Launchpad, Spotlight o el Explorador de Windows.
+
 ## 📂 Estructura del Proyecto
 
 ```
